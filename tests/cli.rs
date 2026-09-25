@@ -131,3 +131,24 @@ fn compare_local_requires_admin() {
         .assert()
         .code(2);
 }
+
+#[test]
+fn analyzes_bare_relative_path() {
+    let t = tempfile::tempdir().unwrap();
+    let msu = build_msu(t.path());
+    let output = cmd()
+        .current_dir(t.path())
+        .arg("analyze")
+        .arg(msu.file_name().unwrap())
+        .args(["--json", "-", "--lang", "en"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(v["package"]["kb"], "KB5129195");
+}

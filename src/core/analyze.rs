@@ -56,6 +56,8 @@ fn sha256_file(path: &Path, ctx: &Ctx) -> Result<String, CoreError> {
 }
 
 pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<AnalysisReport, CoreError> {
+    // 先轉成絕對路徑：之後的拆包（FDI 需要「目錄 + 檔名」）不依賴目前工作目錄
+    let path = &std::path::absolute(path).map_err(|e| CoreError::io(path, e))?;
     let meta = std::fs::metadata(path).map_err(|e| CoreError::io(path, e))?;
     let file_name = path
         .file_name()
