@@ -4,6 +4,8 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 fn main() {
+    // 最先執行：之後以名稱動態載入的 DLL 只從 System32 搜尋
+    restrict_dll_search();
     let args: Vec<OsString> = std::env::args_os().collect();
     match gui_target(&args) {
         Some(file) => {
@@ -30,6 +32,14 @@ fn gui_target(args: &[OsString]) -> Option<Option<PathBuf>> {
         }
         _ => None,
     }
+}
+
+fn restrict_dll_search() {
+    use windows::Win32::System::LibraryLoader::{
+        SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_SYSTEM32,
+    };
+    // SAFETY: 只設定本程序的 DLL 搜尋路徑，沒有其他前置條件。
+    let _ = unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) };
 }
 
 /// 從檔案總管雙擊啟動時，Windows 會為這個主控台程式建立專屬的主控台視窗；

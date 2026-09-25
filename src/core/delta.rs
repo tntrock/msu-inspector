@@ -426,6 +426,14 @@ mod tests {
             &copy,
         )
         .unwrap();
+        // 與 main 的 SetDefaultDllDirectories(SYSTEM32) 相容
+        // SAFETY: 只設定本測試程序的 DLL 搜尋路徑。
+        unsafe {
+            windows::Win32::System::LibraryLoader::SetDefaultDllDirectories(
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+            .unwrap();
+        }
         let lock = open_locked(&copy).unwrap();
         let engine = DeltaEngine::from_path(&copy).expect("load under lock");
         drop(lock);

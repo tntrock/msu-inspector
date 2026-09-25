@@ -4,6 +4,11 @@
 
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        // 相依 DLL 只從 System32 載入（LOAD_LIBRARY_SEARCH_SYSTEM32），
+        // 避免 exe 所在資料夾（例如下載資料夾）被植入同名 DLL
+        if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+            println!("cargo:rustc-link-arg-bins=/DEPENDENTLOADFLAG:0x800");
+        }
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/icon.ico");
         res.set("ProductName", "msu-inspector");
