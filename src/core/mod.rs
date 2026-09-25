@@ -1,5 +1,6 @@
 //! 核心邏輯：不依賴 GUI，可單獨測試。
 
+pub mod container;
 pub mod delta;
 pub mod error;
 pub mod manifest;
