@@ -6,6 +6,7 @@ pub mod error;
 pub mod manifest;
 pub mod model;
 pub mod progress;
+pub mod signature;
 pub mod sys;
 
 pub use error::CoreError;
