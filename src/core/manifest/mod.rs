@@ -1,5 +1,6 @@
 //! manifest / .mum 的共用工具：文字解碼、XML 取值。
 
+pub mod package;
 pub mod parse;
 
 use roxmltree::{Document, Node, ParsingOptions};
@@ -35,7 +36,7 @@ pub fn decode_text(bytes: &[u8]) -> Result<String, CoreError> {
 }
 
 /// 解析 XML；允許 DTD，並略過開頭殘留的 BOM 字元。
-pub(crate) fn parse_doc(text: &str) -> Result<Document<'_>, CoreError> {
+pub(super) fn parse_doc(text: &str) -> Result<Document<'_>, CoreError> {
     let text = text.trim_start_matches('\u{feff}');
     let opts = ParsingOptions {
         allow_dtd: true,
@@ -45,27 +46,27 @@ pub(crate) fn parse_doc(text: &str) -> Result<Document<'_>, CoreError> {
 }
 
 /// 元素的本地名稱（忽略命名空間前綴）是否為 `name`。
-pub(crate) fn is_el(n: Node, name: &str) -> bool {
+pub(super) fn is_el(n: Node, name: &str) -> bool {
     n.is_element() && n.tag_name().name() == name
 }
 
-pub(crate) fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
+pub(super) fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
     n.children().find(|c| is_el(*c, name))
 }
 
-pub(crate) fn elements<'a, 'i: 'a>(
+pub(super) fn elements<'a, 'i: 'a>(
     n: Node<'a, 'i>,
     name: &'a str,
 ) -> impl Iterator<Item = Node<'a, 'i>> + 'a {
     n.children().filter(move |c| is_el(*c, name))
 }
 
-pub(crate) fn attr(n: Node, name: &str) -> Option<String> {
+pub(super) fn attr(n: Node, name: &str) -> Option<String> {
     n.attribute(name).map(str::to_string)
 }
 
 /// 讀取 `assemblyIdentity` 元素。
-pub(crate) fn identity_of(n: Node) -> AssemblyIdentity {
+pub(super) fn identity_of(n: Node) -> AssemblyIdentity {
     AssemblyIdentity {
         name: attr(n, "name").unwrap_or_default(),
         version: attr(n, "version").unwrap_or_default(),
