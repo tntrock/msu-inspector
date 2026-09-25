@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::core::{HSTRING, PCWSTR};
 
-use super::{role_of, Extracted, Item, ItemData, Role};
+use super::{is_reparse_point, is_within, role_of, Extracted, Item, ItemData, Role};
 use crate::core::CoreError;
 
 type Handle = *mut c_void;
@@ -41,7 +41,6 @@ const WIM_OPEN_EXISTING: u32 = 3;
 const WIM_COMPRESS_XPRESS: u32 = 1;
 const WIM_FLAG_NO_DIRACL: u32 = 0x10;
 const WIM_FLAG_NO_FILEACL: u32 = 0x20;
-const WIM_FLAG_NO_RP_FIX: u32 = 0x100;
 const WIM_MSG: u32 = 0x8000 + 0x1476;
 const WIM_MSG_PROCESS: u32 = WIM_MSG + 3;
 const WIM_MSG_SUCCESS: u32 = 0;
@@ -201,7 +200,8 @@ pub fn extract(
                 let ok = WIMApplyImage(
                     img,
                     PCWSTR(HSTRING::from(dest.as_os_str()).as_ptr()),
-                    WIM_FLAG_NO_DIRACL | WIM_FLAG_NO_FILEACL | WIM_FLAG_NO_RP_FIX,
+                    // 不加 WIM_FLAG_NO_RP_FIX：讓 wimgapi 把絕對連結目標修正到展開資料夾內
+                    WIM_FLAG_NO_DIRACL | WIM_FLAG_NO_FILEACL,
                 );
                 let err = last_error();
                 WIMCloseHandle(img);
@@ -235,18 +235,31 @@ pub fn extract(
 /// `want` is re-applied here (not just in the `WIM_MSG_PROCESS` callback) so that any
 /// unwanted-role file that ends up on disk regardless — e.g. because a future wimgapi
 /// quirk applies it despite the callback's skip signal — never becomes an `Item`.
-fn collect_files(
+///
+/// WIM 可能帶有符號連結／目錄連接（WIMApplyImage 會還原重新剖析點）：一律略過、不跟隨，
+/// 並確認每個走訪的資料夾實際位於 `root` 之下，因此只會讀取／刪除暫存資料夾內的檔案。
+pub fn collect_files(
     root: &Path,
     dir: &Path,
     vprefix: &str,
     want: &dyn Fn(Role) -> bool,
     items: &mut Vec<Item>,
 ) -> Result<(), CoreError> {
+    if !is_within(dir, root) {
+        return Ok(());
+    }
     for e in std::fs::read_dir(dir).map_err(|e| CoreError::io(dir, e))? {
         let e = e.map_err(|e| CoreError::io(dir, e))?;
         let path = e.path();
-        if path.is_dir() {
+        let meta = std::fs::symlink_metadata(&path).map_err(|e| CoreError::io(&path, e))?;
+        if is_reparse_point(&meta) {
+            continue;
+        }
+        if meta.is_dir() {
             collect_files(root, &path, vprefix, want, items)?;
+            continue;
+        }
+        if !meta.is_file() {
             continue;
         }
         let name = e.file_name().to_string_lossy().into_owned();

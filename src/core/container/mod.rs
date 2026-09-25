@@ -109,6 +109,22 @@ pub struct Extracted {
     pub skipped: Vec<(String, Role)>,
 }
 
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// 項目本身是否為重新剖析點（符號連結、目錄連接等）。以 symlink_metadata 取得、不跟隨連結。
+pub fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    meta.file_type().is_symlink() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+/// `path` 解析所有連結後是否仍位於 `root` 之下（兩者都要存在）。
+pub fn is_within(path: &Path, root: &Path) -> bool {
+    match (std::fs::canonicalize(path), std::fs::canonicalize(root)) {
+        (Ok(p), Ok(r)) => p.starts_with(r),
+        _ => false,
+    }
+}
+
 /// 依檔頭判斷容器格式；`.psf` 沒有可靠的檔頭，以副檔名判斷。
 pub fn sniff(path: &Path) -> Result<Option<ContainerFormat>, CoreError> {
     let mut head = [0u8; 8];
@@ -266,7 +282,9 @@ fn collect_pass(
                         _ => ContainerFormat::Wim,
                     };
                     if lname == SCAN_METADATA {
-                        let _ = std::fs::remove_file(&fp);
+                        if is_within(&fp, work) {
+                            let _ = std::fs::remove_file(&fp);
+                        }
                         c.containers.push(ContainerInfo {
                             path: item.vpath,
                             format: nested,
@@ -279,8 +297,8 @@ fn collect_pass(
                 Role::Ignore => {}
             }
         }
-        // 巢狀容器展開後即刪除，節省暫存空間（使用者的原始檔不動）
-        if n > 1 {
+        // 巢狀容器展開後即刪除，節省暫存空間（使用者的原始檔與暫存資料夾外的檔案不動）
+        if n > 1 && is_within(&p, work) {
             let _ = std::fs::remove_file(&p);
         }
     }
