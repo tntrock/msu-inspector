@@ -93,3 +93,38 @@ fn reports_native_arch() {
     assert!(["amd64", "arm64", "x86"].contains(&sys::native_arch()));
     assert!(sys::windows_dir().join("System32").is_dir());
 }
+
+#[test]
+fn tampered_package_dll_is_rejected() {
+    // 原封不動的 msdelta.dll 複本仍可透過系統目錄簽章驗證；改動一個位元組後即不再受信任
+    let t = tempfile::tempdir().unwrap();
+    let copy = t.path().join("UpdateCompression.dll");
+    let mut bytes = std::fs::read(sys::windows_dir().join("System32").join("msdelta.dll")).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0xFF;
+    std::fs::write(&copy, bytes).unwrap();
+    let Err(e) = DeltaEngine::from_verified_package(&copy) else {
+        panic!("tampered DLL must not load");
+    };
+    assert!(e.to_string().contains("not signed by Microsoft"), "{e}");
+
+    let unsigned = t.path().join("unsigned.dll");
+    std::fs::write(&unsigned, b"MZ not signed").unwrap();
+    assert!(DeltaEngine::from_verified_package(&unsigned).is_err());
+}
+
+#[test]
+fn package_dll_is_locked_against_replacement_while_verifying() {
+    let t = tempfile::tempdir().unwrap();
+    let p = t.path().join("UpdateCompression.dll");
+    std::fs::write(&p, b"MZ").unwrap();
+    let held = msu_inspector::core::delta::open_locked(&p).unwrap();
+    assert!(
+        std::fs::write(&p, b"MZ swapped").is_err(),
+        "write must fail"
+    );
+    assert!(std::fs::remove_file(&p).is_err(), "delete must fail");
+    assert!(std::fs::read(&p).is_ok(), "readers are still allowed");
+    drop(held);
+    std::fs::remove_file(&p).unwrap();
+}

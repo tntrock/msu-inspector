@@ -45,3 +45,32 @@ fn missing_file_is_not_valid() {
         SignatureStatus::Valid
     );
 }
+
+#[test]
+fn microsoft_root_policy() {
+    use msu_inspector::core::signature::chains_to_microsoft_root;
+    let t = tempfile::tempdir().unwrap();
+    let unsigned = t.path().join("x.dll");
+    std::fs::write(&unsigned, b"MZ not signed").unwrap();
+    assert!(!chains_to_microsoft_root(&unsigned));
+    let p = sys::windows_dir().join("System32").join("MpSigStub.exe");
+    if !p.exists() {
+        eprintln!("skipping: {} not present", p.display());
+        return;
+    }
+    assert!(chains_to_microsoft_root(&p));
+}
+
+#[test]
+fn verification_works_while_file_is_locked() {
+    let src = sys::windows_dir().join("System32").join("MpSigStub.exe");
+    if !src.exists() {
+        eprintln!("skipping: {} not present", src.display());
+        return;
+    }
+    let t = tempfile::tempdir().unwrap();
+    let copy = t.path().join("MpSigStub.exe");
+    std::fs::copy(&src, &copy).unwrap();
+    let _held = msu_inspector::core::delta::open_locked(&copy).unwrap();
+    assert!(is_microsoft_signed(&copy));
+}

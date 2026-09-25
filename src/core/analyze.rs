@@ -87,11 +87,8 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
     let psf_engine = if collected.psfs.is_empty() {
         None
     } else {
-        let package_dll = collected
-            .package_dll
-            .clone()
-            .filter(|p| signature::is_microsoft_signed(p));
-        let engine = DeltaEngine::select(package_dll.as_deref())?;
+        // 套件附帶的 DLL 由 select 鎖住檔案、驗證簽章後才載入
+        let engine = DeltaEngine::select(collected.package_dll.as_deref())?;
         container::resolve_psfs(&mut collected, &engine, ctx)?;
         Some(engine.label().to_string())
     };

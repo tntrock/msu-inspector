@@ -15,7 +15,20 @@ use windows::Win32::System::LibraryLoader::{
 use windows::Win32::System::Memory::{VirtualFree, MEM_RELEASE};
 
 use super::model::parse_version;
-use super::{sys, CoreError};
+use super::{signature, sys, CoreError};
+
+const FILE_SHARE_READ: u32 = 1;
+
+/// 以只允許其他程序「讀取」的共用模式開啟檔案：持有期間無法寫入、改名或刪除，
+/// 但 WinVerifyTrust 與 LoadLibraryExW 仍可讀取。
+pub fn open_locked(path: &Path) -> Result<std::fs::File, CoreError> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+        .map_err(|e| CoreError::io(path, e))
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -97,8 +110,8 @@ impl DeltaEngine {
         Self::from_module(module, format!("system:{dll}"))
     }
 
-    /// 載入指定路徑的 DLL（`.msu` 附帶的 UpdateCompression.dll）。呼叫端必須先驗證簽章。
-    pub fn from_path(path: &Path) -> Result<Self, CoreError> {
+    /// 載入指定路徑的 DLL。呼叫端必須先驗證簽章並鎖住檔案（見 `from_verified_package`）。
+    fn from_path(path: &Path) -> Result<Self, CoreError> {
         // SAFETY: 呼叫端已確認檔案為 Microsoft 簽章。
         let module = unsafe {
             LoadLibraryExW(
@@ -147,13 +160,28 @@ impl DeltaEngine {
         }
     }
 
-    /// 依 spec 的順序：系統 UpdateCompression → 套件附帶（呼叫端已驗證）→ 系統 msdelta。
+    /// 載入 `.msu` 附帶的 DLL：先以只允許讀取共用的方式開啟（防止驗證後被替換），
+    /// 驗證為 Microsoft 簽章且憑證鏈到 Microsoft 根之後才載入，載入完成才放開。
+    pub fn from_verified_package(path: &Path) -> Result<Self, CoreError> {
+        let lock = open_locked(path)?;
+        if !signature::is_microsoft_signed(path) {
+            return Err(CoreError::Delta(format!(
+                "{}: not signed by Microsoft",
+                path.display()
+            )));
+        }
+        let engine = Self::from_path(path);
+        drop(lock);
+        engine
+    }
+
+    /// 依 spec 的順序：系統 UpdateCompression → 套件附帶（通過簽章驗證才載入）→ 系統 msdelta。
     pub fn select(package_dll: Option<&Path>) -> Result<Self, CoreError> {
         if let Ok(e) = Self::system("UpdateCompression.dll") {
             return Ok(e);
         }
         if let Some(p) = package_dll {
-            if let Ok(e) = Self::from_path(p) {
+            if let Ok(e) = Self::from_verified_package(p) {
                 return Ok(e);
             }
         }
@@ -381,5 +409,26 @@ fn load_base_resource(path: &Path) -> Result<Vec<u8>, CoreError> {
         })();
         let _ = FreeLibrary(module);
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 持有 open_locked 的代號時，LoadLibraryExW 仍能載入該檔案。
+    #[test]
+    fn loads_dll_while_locked() {
+        let t = tempfile::tempdir().unwrap();
+        let copy = t.path().join("UpdateCompression.dll");
+        std::fs::copy(
+            sys::windows_dir().join("System32").join("msdelta.dll"),
+            &copy,
+        )
+        .unwrap();
+        let lock = open_locked(&copy).unwrap();
+        let engine = DeltaEngine::from_path(&copy).expect("load under lock");
+        drop(lock);
+        assert!(engine.label().starts_with("package:"));
     }
 }
