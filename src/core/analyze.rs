@@ -108,7 +108,12 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
     warnings.extend(parse_warnings);
 
     let mut mums = Vec::new();
-    for item in &collected.mums {
+    let total = collected.mums.len();
+    for (i, item) in collected.mums.iter().enumerate() {
+        if i % 250 == 0 {
+            ctx.report(Progress::Decoding { done: i, total });
+        }
+        ctx.check()?;
         let parsed = item
             .bytes()
             .and_then(|b| decode_text(&b))

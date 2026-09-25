@@ -353,7 +353,12 @@ pub fn resolve_psfs(c: &mut Collected, engine: &DeltaEngine, ctx: &Ctx) -> Resul
             skipped: None,
         });
         let mut file = File::open(&path).map_err(|e| CoreError::io(&path, e))?;
-        for entry in entries {
+        let total = entries.len();
+        for (i, entry) in entries.into_iter().enumerate() {
+            if i % 250 == 0 {
+                ctx.report(Progress::Decoding { done: i, total });
+            }
+            ctx.check()?;
             let base = entry
                 .name
                 .rsplit(['\\', '/'])

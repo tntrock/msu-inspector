@@ -223,3 +223,32 @@ fn temp_dir_creation_error_names_the_temp_root() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn cancel_stops_mum_parsing() {
+    use std::sync::{Arc, OnceLock};
+    let t = tempfile::tempdir().unwrap();
+    let cab = common::make_cab(
+        t.path(),
+        "only-mum.cab",
+        &[("update.mum", common::fixture("rollup.mum").as_bytes())],
+        false,
+    );
+    // 沒有 manifest 時第一個 Decoding 回報來自 .mum 迴圈；在回呼中按下取消
+    let flag: Arc<OnceLock<Arc<std::sync::atomic::AtomicBool>>> = Arc::default();
+    let f = flag.clone();
+    let ctx = Ctx::new(move |p| {
+        if matches!(p, msu_inspector::core::progress::Progress::Decoding { .. }) {
+            if let Some(c) = f.get() {
+                c.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    });
+    let _ = flag.set(ctx.cancel_flag());
+    let r = analyze(&cab, &AnalyzeOptions::default(), &ctx);
+    assert!(
+        matches!(r, Err(CoreError::Cancelled)),
+        "{:?}",
+        r.map(|_| ())
+    );
+}

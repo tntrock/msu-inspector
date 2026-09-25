@@ -3,7 +3,7 @@ mod common;
 use msu_inspector::core::container::{collect, resolve_psfs};
 use msu_inspector::core::delta::DeltaEngine;
 use msu_inspector::core::model::{ContainerFormat, WarningCode};
-use msu_inspector::core::progress::Ctx;
+use msu_inspector::core::progress::{Ctx, Progress};
 use msu_inspector::core::CoreError;
 
 const PKG_PROPS: &str =
@@ -292,4 +292,47 @@ fn keeps_update_mum_from_every_container() {
             "Windows11.0-KB5099999-x64.msu/Windows11.0-KB5099999-x64.cab/update.mum",
         ]
     );
+}
+
+#[test]
+fn cancel_stops_psf_entry_loop() {
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path();
+    let (psf, _) = common::build_psf(
+        d,
+        "kb.psf",
+        &[(r"amd64_x\a.manifest", b"<assembly/>", false)],
+        true,
+    );
+    let msu = common::make_cab(
+        d,
+        "x.msu",
+        &[("kb.psf", &std::fs::read(&psf).unwrap())],
+        false,
+    );
+    let mut c = collect(&msu, &d.join("work"), &Ctx::silent()).unwrap();
+    assert_eq!(c.psfs.len(), 1);
+    // 在 PSF 開始展開時按下取消：項目迴圈必須停下，而不是讀完所有項目
+    let r = resolve_psfs(
+        &mut c,
+        &DeltaEngine::select(None).unwrap(),
+        &cancel_on(|p| matches!(p, Progress::Unpacking { .. })),
+    );
+    assert!(matches!(r, Err(CoreError::Cancelled)), "{r:?}");
+}
+
+/// 收到符合條件的進度回報時，由回呼本身按下取消。
+fn cancel_on(when: impl Fn(&Progress) -> bool + Send + Sync + 'static) -> Ctx {
+    use std::sync::{Arc, OnceLock};
+    let flag: Arc<OnceLock<Arc<std::sync::atomic::AtomicBool>>> = Arc::default();
+    let f = flag.clone();
+    let ctx = Ctx::new(move |p| {
+        if when(&p) {
+            if let Some(c) = f.get() {
+                c.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    });
+    let _ = flag.set(ctx.cancel_flag());
+    ctx
 }
