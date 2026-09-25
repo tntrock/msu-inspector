@@ -1,6 +1,7 @@
 //! 容器拆解：CAB / WIM / PSF，輸出 manifest、.mum 等需要的項目。
 
 pub mod cab;
+pub mod psf;
 pub mod wim;
 
 use std::borrow::Cow;
