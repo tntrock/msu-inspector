@@ -3,6 +3,7 @@
 pub mod container;
 pub mod delta;
 pub mod error;
+pub mod local;
 pub mod manifest;
 pub mod model;
 pub mod progress;
