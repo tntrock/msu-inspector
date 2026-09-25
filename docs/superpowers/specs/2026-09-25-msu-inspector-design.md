@@ -1,7 +1,7 @@
 # msu-inspector 設計文件
 
 - 日期：2026-09-25
-- 狀態：待審閱
+- 狀態：已核准（2026-09-25）；2026-09-25 依格式研究結果修訂（見第 11 節）
 - Repo：`tntrock/msu-inspector`（公開，MIT）
 - 本機路徑：`D:\Claude\msu-inspector`
 
@@ -27,7 +27,7 @@
 盡可能廣：
 
 - 傳統 `.msu`：CAB 內含 CAB（Windows 10 22H2、Windows 11 23H2 以前、Server 2016/2019/2022）
-- 新式 `.msu`：`.wim` + `.psf` 差異封裝（Windows 11 24H2 / 25H2、Server 2025）
+- 新式 `.msu`：**`.msu` 本身就是 WIM 檔**（檔頭 `MSWIM`），內含 `.wim` + `.psf` 差異封裝與數個 CAB（Windows 11 24H2 / 25H2、Server 2025）
 - 獨立 `.cab` 更新包
 - .NET Framework 累積更新、SSU 等特殊包
 - manifest 的 DCM（PA30 差異）壓縮
@@ -50,18 +50,19 @@
 | 檔案對話框 | `rfd` | 同上 |
 | CLI | `clap`（derive） | 標準做法 |
 | Win32 API | `windows` crate | 呼叫系統內建 DLL |
-| XML | `quick-xml` | 串流解析，處理大型 LCU 的上萬個 manifest |
-| 其他 | `serde` / `serde_json`、`thiserror`、`sha2` | |
+| XML | `roxmltree` | 唯讀 DOM，API 穩定；單一 manifest 很小，逐檔解析即可 |
+| 其他 | `serde` / `serde_json`、`thiserror`、`sha2`、`egui_extras`（虛擬捲動表格） | |
 | 測試 | `tempfile`、`assert_cmd` | |
 
-**容器與壓縮一律呼叫 Windows 內建 DLL，不依賴第三方 exe，也不需要系統管理員權限：**
+**容器與壓縮一律呼叫 Windows 內建 DLL，不依賴第三方 exe：**
 
 | 需求 | 使用 |
 |------|------|
-| CAB | `cabinet.dll`（FDI API） |
-| WIM | `wimgapi.dll` |
-| PSF | 自行解析 `express.psf.cix.xml`，以 `msdelta.dll` 還原 |
-| DCM manifest | `msdelta.dll` + 本機 servicing stack 的 `wcp.dll` 內嵌基底字典（作法參考 SXSEXP） |
+| CAB | `cabinet.dll`（FDI API）：單次循序解壓，於 `fdintCOPY_FILE` 只挑需要的檔案（manifest、`.mum`、巢狀容器等）。純 Rust 的 `cab` crate 讀取 LZX 固實資料夾中的每個檔案都要從頭解壓，數萬個 manifest 時為平方時間，故不採用 |
+| WIM | `wimgapi.dll`（以不套用 ACL 的方式展開到暫存資料夾） |
+| PSF | 自行解析索引（獨立的 `*.psf.cix.xml`，或 PSF 檔頭內嵌、以 PA30 壓縮的索引），依來源型別還原：RAW 直接讀、PA30 用差異引擎、PA19 用 `mspatcha.dll` |
+| 差異引擎（PA30） | 優先使用系統的 `UpdateCompression.dll`（24H2 起內建），其次為 `.msu` 內 `DesktopDeployment.cab` 附帶的 `UpdateCompression.dll`（**載入前驗證 Microsoft 簽章**），最後才用 `msdelta.dll` |
+| DCM manifest | 差異引擎 + 本機 servicing stack `wcp.dll` 內嵌基底字典（資源型別 `0x266`、ID `1`；已在本機驗證可解開 WinSxS 內 19,173 個 manifest） |
 | 簽章驗證 | `WinVerifyTrust` |
 
 建置設定沿用既有專案：release profile `opt-level = "z"`、`lto`、`codegen-units = 1`、`strip`、`panic = "abort"`；`build.rs` 以 `winresource` 嵌入圖示與版本資訊；CJK 字型於執行時從 `C:\Windows\Fonts\msjh.ttc` 載入。
@@ -102,7 +103,8 @@ src/
       detect.rs        格式偵測
       cab.rs           cabinet.dll FDI（可處理巢狀 CAB）
       wim.rs           wimgapi.dll
-      psf.rs           express.psf.cix.xml + msdelta
+      psf.rs           PSF 索引解析與還原
+    delta.rs         差異引擎（UpdateCompression / msdelta / mspatcha）
     manifest/
       dcm.rs           DCM 解壓
       parse.rs         .mum / .manifest XML 解析為結構化資料
@@ -158,16 +160,21 @@ core 不依賴 GUI，可獨立測試。
 |--------|------|----------|
 | `file` | `<file>` | 目的路徑、檔名、版本、雜湊、大小、是否為 PE、`importPath`、SDDL |
 | `registry` | `<registryKeys>` | 機碼、值名稱、型別、資料、動作（新增 / 修改 / 刪除）、`owner`、SDDL |
-| `service` | Services category 的 `<serviceData>` | 服務名稱、映像路徑、啟動類型、帳戶、相依服務、失敗動作 |
-| `driver` | `.inf` / `.sys` 檔、`driverUpdates`、`BootCritical` | 驅動名稱、載入階段 |
-| `scheduled_task` | `<taskScheduler>` | 工作路徑、觸發條件、執行程式、執行身分 |
-| `generic_command` | `<genericCommands>` | 可執行檔、參數、執行時機、錯誤處理方式 |
-| `firewall_rule` | MPSSVC 規則（`<configuration>` / 登錄） | 方向、程式、連接埠、動作 |
-| `wmi_mof` | `<mof>` | MOF 檔、命名空間 |
-| `etw_eventlog` | `<instrumentation>` | 提供者、通道 |
-| `directory` | `<directories>` | 路徑、SDDL |
-| `setting` | 其他 SMI `<configuration>` | 原樣保留 |
+| `service` | `<memberships><categoryMembership><categoryInstance><serviceData>` | 服務名稱、映像路徑、啟動類型、服務型別、帳戶、權限、群組 |
+| `driver` | `serviceData` 的 `type` 為 `kernelDriver` / `fileSystemDriver` / `recognizerDriver`，或 `.sys` 檔；`BootCritical` 類別 | 驅動名稱、映像路徑、載入階段（boot / system / auto / demand）、是否為 BootCritical |
+| `scheduled_task` | `<taskScheduler><Task>` | 工作路徑（URI）、觸發條件、執行程式與參數、執行身分 |
+| `generic_command` | `<genericCommands><genericCommand>` | `executableName`、`arguments`、是否於安裝時執行 |
+| `firewall_rule` | `<firewallRule>` 元素，以及 `...\FirewallPolicy\FirewallRules` / `RestrictedServices` 下的登錄值 | 方向、程式、連接埠、協定、動作 |
+| `wmi_mof` | `<mof>` | MOF 檔、反安裝 MOF |
+| `etw_eventlog` | `<instrumentation>` | 提供者名稱、GUID |
+| `advanced_installer` | 安裝時會執行自訂程式碼的元素：名稱以 `AI` 結尾者（`fveUpdateAI`、`HTTPAI`…）、`bfsvc`、`SecureBoot`、`appxRegistration`、`networkComponents`、`unattendActions`、`sppInstaller` 等 | 元素名稱、全部屬性 |
+| `directory` | `<directories>` | 路徑、SDDL 名稱 |
+| `setting` | SMI `<configuration>` | 設定名稱 |
 | `unknown` | 未辨識的元素 | 保留原始 XML 片段，不丟棄 |
+
+不視為動作的結構性元素：`assemblyIdentity`、`dependency`、`trustInfo`、`localization`、`deployment`、`migration`、`rescache`、`languagePack`、`imaging`、`feature`、`categoryDefinitions`、`satelliteCategory`、`languageCategory`、`containsSettings`、`compatibility`、`noInheritable`、`mvid`。`memberships` 只擷取服務與類別（`typeName`），不另列為動作。
+
+檔案沒有個別版本欄位；檔案的「新版本」一律以所屬元件的 `assemblyIdentity` 版本表示。
 
 ### 4.3 風險規則
 
@@ -219,6 +226,7 @@ core 不依賴 GUI，可獨立測試。
   - `summary`：輸出到 `summary` 為止
   - `risk`：再加 `high_risk`
   - `full`：再加完整 `components`
+- detail ≥ `risk` 時另輸出 `rules`：本次出現的規則 ID → 等級與理由；`high_risk` 與各動作只以規則 ID 參照，避免同一段理由重複數千次。
 - `export_filter` 記錄本次匯出篩掉了什麼，讓 AI 知道資料並不完整。
 - `warnings` 一律輸出。
 - JSON 鍵名一律英文，不隨介面語言變動；`reason` 等說明文字依匯出時的語言輸出。
@@ -231,7 +239,7 @@ core 不依賴 GUI，可獨立測試。
 ├──────────────┬──────────────────────────────┬─────────────────┤
 │ 分類樹        │ 動作表格（虛擬捲動）           │ 詳細資料窗格     │
 │ 高風險 / 各類別│ 風險│類別│目標│動作│本機狀態    │ 全部欄位、命中規則│
-│              │ 搜尋框 + 篩選（風險/類別/狀態） │ 原始 XML         │
+│              │ 搜尋框 + 篩選（風險/類別/狀態） │ unknown 原始 XML │
 ├──────────────┴──────────────────────────────┴─────────────────┤
 │ 狀態列：進度條 [取消] · 警告數（點擊查看）                          │
 └──────────────────────────────────────────────────────────────┘
@@ -256,11 +264,11 @@ msu-inspector analyze <FILE> [--json <OUT>] [--detail summary|risk|full]
 | 項目 | 作法 | 狀態值 |
 |------|------|--------|
 | 檔案 | 讀本機對應路徑檔案版本（`GetFileVersionInfoW`） | `new` / `replace` / `same` / `downgrade` |
-| 元件 | 以唯讀方式載入 COMPONENTS hive，查已安裝元件與版本 | `installed` / `not_installed` / `older` / `newer` |
+| 元件 | 列出 `C:\Windows\WinSxS\Manifests` 的檔名（keyform：`arch_短名稱_token_版本_語系_雜湊`），短名稱含 `..` 時以前綴 + 後綴比對 | `in_store_same` / `in_store_older` / `in_store_newer` / `not_in_store` |
 | 適用性 | 比對 OS build 與架構 | 不符時報告頂端標示「此 KB 不適用本機，比對結果僅供參考」 |
 | 服務 / 登錄 | 讀本機現值 | 顯示現值 → 新值 |
 
-若 COMPONENTS hive 已由系統載入則直接讀取；否則以 `RegLoadAppKeyW` 唯讀載入，結束時卸載。程式不寫入系統任何位置。
+元件存放區（WinSxS）同時包含「已安裝」與「僅暫存」的元件，因此狀態值以 `in_store_*` 命名，不宣稱「已安裝」。程式不寫入系統任何位置。
 
 ## 9. 錯誤處理
 
@@ -276,3 +284,13 @@ msu-inspector analyze <FILE> [--json <OUT>] [--detail summary|risk|full]
 - **容器測試**：測試時以系統 `makecab.exe` 產生小型巢狀 CAB，驗證拆包。
 - **真實樣本整合測試**：真實 `.msu` 太大，不放進 repo。設定環境變數 `MSU_INSPECTOR_SAMPLES=<資料夾>` 才執行，涵蓋傳統 LCU、24H2 PSF 格式、.NET 累積更新、SSU 各一包；README 附上從 Microsoft Update Catalog 取得樣本的清單。
 - **CLI 端對端**：`assert_cmd`。
+
+## 11. 格式研究結果（2026-09-25）
+
+實作前在本機（Windows 11 26100）驗證，並參考 PSFExtractor、PatchExtract.ps1 的公開原始碼：
+
+- WinSxS manifest 以 `DCM\x01` 開頭，後接 PA30 差異資料；以 `wcp.dll` 資源（型別 `0x266`、ID `1`，9,066 位元組的 XML）為基底呼叫 `ApplyDeltaB` 即可還原。本機 19,173 個 manifest 全數成功。
+- 本機 manifest 的頂層元素統計決定了第 4.2 節的分類；服務定義位於 `memberships` 內，而非頂層。
+- 累積更新的 `.mum` 為 PSFX 格式（`customInformation PackageFormat="PSFX"`），頂層套件以 `<update><package>` 參照數千個子套件，元件清單在子套件 `.mum` 的 `<update><component>` 中。
+- 24H2 起 `.msu` 本身為 WIM（檔頭 `MSWIM`）；內含的 `.psf` 在偏移 4 有 u32 索引長度，偏移 `0x80` 起為 PA30（空來源）壓縮的索引 XML（`<Container type="PSF"><Files><File name><Delta><Source type offset length>`）。
+- 詳細資料窗格的「原始 XML」只保留給 `unknown` 動作；其餘動作以結構化欄位呈現，避免大型 LCU 在記憶體中保留數百 MB 的 manifest 原文。
