@@ -543,6 +543,7 @@ pub enum WarningCode {
     PsfFailed,
     SignatureNotValid,
     LocalCompareFailed,
+    TempCleanupFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

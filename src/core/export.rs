@@ -83,6 +83,10 @@ pub fn warning_message(code: WarningCode, lang: Lang) -> &'static str {
             "無法讀取本機狀態，未做本機比對",
             "Local state could not be read; no local comparison was made",
         ),
+        WarningCode::TempCleanupFailed => (
+            "暫存資料夾無法完全刪除，請手動刪除",
+            "The temporary folder could not be fully removed; delete it manually",
+        ),
     };
     match lang {
         Lang::ZhTw => zh,

@@ -78,7 +78,10 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
         Some(root) => builder.tempdir_in(root),
         None => builder.tempdir(),
     }
-    .map_err(|e| CoreError::io(path, e))?;
+    .map_err(|e| {
+        let root = opts.temp_root.clone().unwrap_or_else(std::env::temp_dir);
+        CoreError::io(&root, e)
+    })?;
 
     let mut collected = container::collect(path, temp.path(), ctx)?;
     let psf_engine = if collected.psfs.is_empty() {
@@ -163,8 +166,20 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
         }
     }
     risk::apply(&mut report);
-    temp.close().map_err(|e| CoreError::io(path, e))?;
+    close_temp(temp, &mut report.warnings);
     Ok(report)
+}
+
+/// 刪除暫存資料夾；失敗（例如防毒軟體占用檔案）時保留已完成的報告，只加一筆警告並附上路徑。
+pub fn close_temp(temp: tempfile::TempDir, warnings: &mut Vec<Warning>) {
+    let dir = temp.path().display().to_string();
+    if let Err(e) = temp.close() {
+        warnings.push(Warning::new(
+            WarningCode::TempCleanupFailed,
+            dir,
+            e.to_string(),
+        ));
+    }
 }
 
 type DcmTools = (DeltaEngine, Result<DcmDecoder, CoreError>);

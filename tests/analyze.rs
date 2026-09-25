@@ -177,3 +177,49 @@ fn labels_formats() {
         "cab"
     );
 }
+
+#[test]
+fn temp_cleanup_failure_keeps_report_and_warns() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let temp = tempfile::Builder::new()
+        .prefix("msu-inspector-test-")
+        .tempdir()
+        .unwrap();
+    let temp_path = temp.path().to_path_buf();
+    let locked = temp_path.join("locked.bin");
+    // 不允許任何共用（含刪除），模擬防毒軟體占用暫存檔
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .share_mode(0)
+        .open(&locked)
+        .unwrap();
+    let mut warnings = Vec::new();
+    msu_inspector::core::analyze::close_temp(temp, &mut warnings);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0].code, WarningCode::TempCleanupFailed);
+    assert_eq!(warnings[0].subject, temp_path.display().to_string());
+    drop(held);
+    let _ = std::fs::remove_dir_all(&temp_path);
+
+    let clean = tempfile::tempdir().unwrap();
+    let mut none = Vec::new();
+    msu_inspector::core::analyze::close_temp(clean, &mut none);
+    assert!(none.is_empty());
+}
+
+#[test]
+fn temp_dir_creation_error_names_the_temp_root() {
+    let t = tempfile::tempdir().unwrap();
+    let msu = build_msu(t.path());
+    let root = t.path().join("no-such-root");
+    let opts = AnalyzeOptions {
+        temp_root: Some(root.clone()),
+        ..Default::default()
+    };
+    match analyze(&msu, &opts, &Ctx::silent()) {
+        Err(CoreError::Io { path, .. }) => assert_eq!(path, root.display().to_string()),
+        other => panic!("{other:?}"),
+    }
+}
