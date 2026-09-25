@@ -46,6 +46,8 @@ const WIM_MSG: u32 = 0x8000 + 0x1476;
 const WIM_MSG_PROCESS: u32 = WIM_MSG + 3;
 const WIM_MSG_SUCCESS: u32 = 0;
 const WIM_MSG_ABORT_IMAGE: u32 = 0xFFFF_FFFF;
+/// `WIMRegisterMessageCallback` returns this on failure.
+const INVALID_CALLBACK_VALUE: u32 = 0xFFFF_FFFF;
 
 const ERROR_ACCESS_DENIED: u32 = 5;
 const ERROR_PRIVILEGE_NOT_HELD: u32 = 1314;
@@ -111,7 +113,9 @@ unsafe extern "system" fn on_message(
             ctx.skipped.push((vpath, role));
         }
         // SAFETY: lParam points to a BOOL owned by wimgapi for the duration of this
-        // callback; writing 0 (FALSE) tells wimgapi to skip applying this file.
+        // callback. Writing 0 (FALSE) tells wimgapi to skip applying this file — this
+        // matches Microsoft's own Convert-WindowsImage.ps1 SkipFile() helper, which
+        // writes FALSE (0) to lParam to skip a file (TRUE/1 keeps it).
         unsafe { *(lparam as *mut i32) = 0 };
     }
     WIM_MSG_SUCCESS
@@ -170,19 +174,30 @@ pub fn extract(
         if h.is_null() {
             return Err(map_error(last_error(), vprefix));
         }
+        let mut registered = false;
         let result = (|| {
             if WIMSetTemporaryPath(h, PCWSTR(HSTRING::from(tmp.as_os_str()).as_ptr())) == 0 {
                 return Err(map_error(last_error(), vprefix));
             }
-            WIMRegisterMessageCallback(h, on_message, &mut ctx as *mut CallbackCtx as *mut c_void);
+            let cb = WIMRegisterMessageCallback(
+                h,
+                on_message,
+                &mut ctx as *mut CallbackCtx as *mut c_void,
+            );
+            if cb == INVALID_CALLBACK_VALUE {
+                return Err(map_error(last_error(), vprefix));
+            }
+            registered = true;
             let count = WIMGetImageCount(h);
             for index in 1..=count {
+                // Create the destination directory before loading the image, so a
+                // failure here cannot leak the WIMLoadImage handle.
+                let dest = out_dir.join(index.to_string());
+                std::fs::create_dir_all(&dest).map_err(|e| CoreError::io(&dest, e))?;
                 let img = WIMLoadImage(h, index);
                 if img.is_null() {
                     return Err(map_error(last_error(), vprefix));
                 }
-                let dest = out_dir.join(index.to_string());
-                std::fs::create_dir_all(&dest).map_err(|e| CoreError::io(&dest, e))?;
                 let ok = WIMApplyImage(
                     img,
                     PCWSTR(HSTRING::from(dest.as_os_str()).as_ptr()),
@@ -199,7 +214,9 @@ pub fn extract(
             }
             Ok(())
         })();
-        WIMUnregisterMessageCallback(h, on_message);
+        if registered {
+            WIMUnregisterMessageCallback(h, on_message);
+        }
         WIMCloseHandle(h);
         result?;
     }
@@ -209,27 +226,32 @@ pub fn extract(
         items: Vec::new(),
         skipped: ctx.skipped,
     };
-    collect_files(out_dir, out_dir, vprefix, &mut out.items)?;
+    collect_files(out_dir, out_dir, vprefix, want, &mut out.items)?;
     Ok(out)
 }
 
 /// 走訪展開結果，把需要的檔案轉成 Item；小檔讀進記憶體後刪除。
+///
+/// `want` is re-applied here (not just in the `WIM_MSG_PROCESS` callback) so that any
+/// unwanted-role file that ends up on disk regardless — e.g. because a future wimgapi
+/// quirk applies it despite the callback's skip signal — never becomes an `Item`.
 fn collect_files(
     root: &Path,
     dir: &Path,
     vprefix: &str,
+    want: &dyn Fn(Role) -> bool,
     items: &mut Vec<Item>,
 ) -> Result<(), CoreError> {
     for e in std::fs::read_dir(dir).map_err(|e| CoreError::io(dir, e))? {
         let e = e.map_err(|e| CoreError::io(dir, e))?;
         let path = e.path();
         if path.is_dir() {
-            collect_files(root, &path, vprefix, items)?;
+            collect_files(root, &path, vprefix, want, items)?;
             continue;
         }
         let name = e.file_name().to_string_lossy().into_owned();
         let role = role_of(&name);
-        if role == Role::Ignore {
+        if role == Role::Ignore || !want(role) {
             continue;
         }
         let rel: Vec<String> = path
