@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::path::{Path, PathBuf};
+use std::path::{self, Path, PathBuf};
 
 use windows::core::{w, HSTRING};
 use windows::Win32::Foundation::ERROR_SUCCESS;
@@ -187,12 +187,26 @@ pub fn compare_component(store: &Store, id: &AssemblyIdentity) -> LocalStatus {
 
 // ---------------- 檔案 ----------------
 
+/// manifest 內容不可信：只接受由一般名稱組成的相對路徑（可為空）。
+/// 拒絕磁碟機／UNC 前綴、根目錄、`\` 開頭與 `..`，避免 `join` 取代基底路徑
+/// 而讓本機比對存取任意位置（例如以系統管理員身分連到遠端 SMB 分享）。
+fn is_plain_relative(s: &str) -> bool {
+    !s.starts_with(['\\', '/'])
+        && Path::new(s)
+            .components()
+            .all(|c| matches!(c, path::Component::Normal(_)))
+}
+
 /// 把 manifest 的 `$(runtime.xxx)` 目的路徑轉成本機路徑；無法對應時回傳 None。
 pub fn resolve_path(dest: &str, windows: &Path, wow32: bool) -> Option<PathBuf> {
     let rest = dest.strip_prefix("$(")?;
     let end = rest.find(')')?;
     let var = rest[..end].to_ascii_lowercase();
-    let tail = rest[end + 1..].trim_start_matches('\\');
+    let tail = &rest[end + 1..];
+    let tail = tail.strip_prefix('\\').unwrap_or(tail);
+    if !is_plain_relative(tail) {
+        return None;
+    }
     let win = windows.to_string_lossy();
     let drive = PathBuf::from(format!("{}\\", win.get(..2)?));
     let program_files = if wow32 {
@@ -273,6 +287,9 @@ pub fn compare_file(
     let Some(dir) = resolve_path(&f.destination, windows, wow32) else {
         return status(LocalState::UnknownPath, None, None);
     };
+    if f.name.is_empty() || !is_plain_relative(&f.name) {
+        return status(LocalState::UnknownPath, None, None);
+    }
     let path = dir.join(&f.name);
     if !path.exists() {
         return status(LocalState::New, None, Some(component_version.to_string()));
@@ -593,10 +610,11 @@ pub fn compare_service(name: &str, incoming: &ServiceSnapshot, windows: &Path) -
 }
 
 pub fn compare_task(uri: &str, windows: &Path) -> LocalStatus {
-    let path = windows
-        .join("System32")
-        .join("Tasks")
-        .join(uri.trim_start_matches('\\'));
+    let rel = uri.strip_prefix('\\').unwrap_or(uri);
+    if rel.is_empty() || !is_plain_relative(rel) {
+        return status(LocalState::UnknownPath, None, None);
+    }
+    let path = windows.join("System32").join("Tasks").join(rel);
     let state = if path.exists() {
         LocalState::Present
     } else {

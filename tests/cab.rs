@@ -149,7 +149,7 @@ fn rejects_non_cab() {
 }
 
 /// 可壓縮但不重複的文字內容：MSZIP 會產生 Huffman 壓縮區塊，
-/// 中段損毀必定讓解壓失敗（未壓縮區塊的損毀 FDI 不會察覺）。
+/// 中段損毀會讓解壓失敗（未壓縮區塊的損毀 FDI 不會察覺）。
 fn text_body(len: usize, seed: u32) -> Vec<u8> {
     let mut x = seed.wrapping_mul(2654435761).max(1);
     let mut out = Vec::with_capacity(len + 64);
@@ -158,13 +158,7 @@ fn text_body(len: usize, seed: u32) -> Vec<u8> {
         x ^= x >> 17;
         x ^= x << 5;
         out.extend_from_slice(
-            format!(
-                "<file name=\"f{}\" size=\"{}\"/>
-",
-                x % 9973,
-                x >> 20
-            )
-            .as_bytes(),
+            format!("<file name=\"f{}\" size=\"{}\"/>\n", x % 9973, x >> 20).as_bytes(),
         );
     }
     out.truncate(len);

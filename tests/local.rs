@@ -304,3 +304,61 @@ fn first_store_entry_is_same() {
         LocalState::InStoreSame
     );
 }
+
+#[test]
+fn rejects_untrusted_path_tails() {
+    for dest in [
+        r"$(runtime.system32)\\host\share",
+        r"$(runtime.system32)\\\host\share",
+        r"$(runtime.system32)\..\..\x",
+        r"$(runtime.system32)\C:\x",
+        r"$(runtime.windows)\a\..\..\b",
+    ] {
+        assert_eq!(resolve_path(dest, &win(), false), None, "{dest}");
+    }
+    assert_eq!(
+        resolve_path(r"$(runtime.system32)\drivers\", &win(), false),
+        Some(PathBuf::from(r"C:\Windows\System32\drivers\"))
+    );
+}
+
+#[test]
+fn file_names_that_escape_the_destination_are_unknown_path() {
+    for name in [
+        r"\\host\share\x.dll",
+        r"\x.dll",
+        r"..\x.dll",
+        r"a\..\..\x.dll",
+        r"C:\x.dll",
+        r"C:x.dll",
+        "",
+    ] {
+        let f = FileAction {
+            name: name.into(),
+            destination: "$(runtime.system32)\\".into(),
+            is_pe: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            compare_file(&f, "10.0.1.1", false, &win()).state,
+            LocalState::UnknownPath,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn task_uris_that_escape_the_tasks_folder_are_unknown_path() {
+    for uri in [
+        r"\\host\share\t",
+        r"\..\..\x",
+        r"\Microsoft\..\..\..\x",
+        r"C:\x",
+    ] {
+        assert_eq!(
+            compare_task(uri, &sys::windows_dir()).state,
+            LocalState::UnknownPath,
+            "{uri}"
+        );
+    }
+}
