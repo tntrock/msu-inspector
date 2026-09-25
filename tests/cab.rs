@@ -147,3 +147,107 @@ fn rejects_non_cab() {
     let r = cab::extract(&p, "fake.cab", t.path(), &AtomicBool::new(false), &all);
     assert!(matches!(r, Err(CoreError::Container { .. })), "{r:?}");
 }
+
+/// 可壓縮但不重複的文字內容：MSZIP 會產生 Huffman 壓縮區塊，
+/// 中段損毀必定讓解壓失敗（未壓縮區塊的損毀 FDI 不會察覺）。
+fn text_body(len: usize, seed: u32) -> Vec<u8> {
+    let mut x = seed.wrapping_mul(2654435761).max(1);
+    let mut out = Vec::with_capacity(len + 64);
+    while out.len() < len {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        out.extend_from_slice(
+            format!(
+                "<file name=\"f{}\" size=\"{}\"/>
+",
+                x % 9973,
+                x >> 20
+            )
+            .as_bytes(),
+        );
+    }
+    out.truncate(len);
+    out
+}
+
+/// 只列出結果種類，避免失敗訊息印出整個檔案內容。
+fn summary(r: &Result<msu_inspector::core::container::Extracted, CoreError>) -> String {
+    match r {
+        Ok(ex) => format!("Ok({} items)", ex.items.len()),
+        Err(e) => format!("Err({e})"),
+    }
+}
+
+/// 覆寫 CAB 中段的位元組（位於 CFDATA 內），模擬資料區損毀。
+fn corrupt_middle(path: &std::path::Path) {
+    let mut bytes = std::fs::read(path).unwrap();
+    let mid = bytes.len() / 2;
+    for b in &mut bytes[mid..mid + 4096] {
+        *b = 0xFF;
+    }
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn corrupt_cfdata_in_memory_item_fails_cleanly() {
+    let t = tempfile::tempdir().unwrap();
+    let body = text_body(1 << 20, 1);
+    let cab_path = common::make_cab(t.path(), "bad.cab", &[("big.manifest", &body)], false);
+    corrupt_middle(&cab_path);
+    let out = t.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let r = cab::extract(&cab_path, "bad.cab", &out, &AtomicBool::new(false), &all);
+    assert!(
+        matches!(r, Err(CoreError::Container { .. })),
+        "{}",
+        summary(&r)
+    );
+}
+
+#[test]
+fn corrupt_cfdata_with_multiple_files_fails_cleanly_and_removes_partial_output() {
+    let t = tempfile::tempdir().unwrap();
+    let a = text_body(300_000, 2);
+    let inner = text_body(600_000, 3);
+    let b = text_body(300_000, 4);
+    let cab_path = common::make_cab(
+        t.path(),
+        "multi.cab",
+        &[
+            ("a.manifest", &a),
+            ("inner.cab", &inner),
+            ("b.manifest", &b),
+        ],
+        false,
+    );
+    corrupt_middle(&cab_path);
+    let out = t.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let r = cab::extract(&cab_path, "multi.cab", &out, &AtomicBool::new(false), &all);
+    assert!(
+        matches!(r, Err(CoreError::Container { .. })),
+        "{}",
+        summary(&r)
+    );
+    let left: Vec<_> = std::fs::read_dir(&out).unwrap().collect();
+    assert!(left.is_empty(), "partial output left behind: {left:?}");
+}
+
+#[test]
+fn oversized_in_memory_item_is_rejected() {
+    let t = tempfile::tempdir().unwrap();
+    let body = vec![b'x'; (cab::MAX_MEMORY_ITEM + 1) as usize];
+    let cab_path = common::make_cab(t.path(), "huge.cab", &[("huge.manifest", &body)], false);
+    let r = cab::extract(
+        &cab_path,
+        "huge.cab",
+        t.path(),
+        &AtomicBool::new(false),
+        &all,
+    );
+    let Err(CoreError::Container { detail, .. }) = r else {
+        panic!("{}", summary(&r))
+    };
+    assert!(detail.contains("too large"), "{detail}");
+}
