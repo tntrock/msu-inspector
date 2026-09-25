@@ -182,8 +182,13 @@ impl Collected {
 }
 
 pub fn collect(path: &Path, work: &Path, ctx: &Ctx) -> Result<Collected, CoreError> {
-    let first = collect_pass(path, &work.join("pass1"), ctx, false)?;
+    let pass1 = work.join("pass1");
+    let first = collect_pass(path, &pass1, ctx, false)?;
     if first.manifests.is_empty() && first.saw_psf {
+        // 第二輪會重新展開全部內容（含 package_dll），第一輪的結果不再需要：
+        // 先刪除以免暫存空間加倍
+        drop(first);
+        let _ = std::fs::remove_dir_all(&pass1);
         let mut second = collect_pass(path, &work.join("pass2"), ctx, true)?;
         second.saw_psf = true;
         return Ok(second);

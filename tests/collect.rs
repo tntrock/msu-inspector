@@ -336,3 +336,46 @@ fn cancel_on(when: impl Fn(&Progress) -> bool + Send + Sync + 'static) -> Ctx {
     let _ = flag.set(ctx.cancel_flag());
     ctx
 }
+
+#[test]
+fn second_pass_removes_first_pass_and_keeps_package_dll() {
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path();
+    let dd = common::make_cab(
+        d,
+        "DesktopDeployment.cab",
+        &[("UpdateCompression.dll", b"MZ-fake")],
+        false,
+    );
+    let (psf, xml) = common::build_psf(
+        d,
+        "kb.psf",
+        &[(r"amd64_x\a.manifest", b"<assembly/>", false)],
+        false,
+    );
+    let inner = common::make_cab(
+        d,
+        "kb.cab",
+        &[
+            ("update.mum", b"<assembly/>"),
+            ("express.psf.cix.xml", xml.as_bytes()),
+        ],
+        false,
+    );
+    let msu = common::make_cab(
+        d,
+        "x.msu",
+        &[
+            ("DesktopDeployment.cab", &std::fs::read(&dd).unwrap()),
+            ("kb.cab", &std::fs::read(&inner).unwrap()),
+            ("kb.psf", &std::fs::read(&psf).unwrap()),
+        ],
+        false,
+    );
+    let work = d.join("work");
+    let c = collect(&msu, &work, &Ctx::silent()).unwrap();
+    assert_eq!(c.psfs.len(), 1, "second pass must run");
+    assert!(!work.join("pass1").exists(), "pass1 must be removed");
+    let dll = c.package_dll.expect("UpdateCompression.dll path");
+    assert_eq!(std::fs::read(dll).unwrap(), b"MZ-fake");
+}
