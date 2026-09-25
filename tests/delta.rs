@@ -29,6 +29,16 @@ fn rejects_garbage_delta() {
 }
 
 #[test]
+fn applies_empty_target_round_trip() {
+    // msdelta.dll 的 CreateDeltaB 接受空目標（回傳成功、輸出 0 位元組，start 為 NULL）；
+    // ApplyDeltaB 同樣以 NULL start、size 0 成功回傳，驗證 apply()/create() 對此情形不會
+    // 對 NULL 指標呼叫 from_raw_parts。
+    let e = msdelta();
+    let d = e.create(b"", b"").expect("msdelta accepts an empty target");
+    assert_eq!(e.apply(b"", &d).unwrap(), Vec::<u8>::new());
+}
+
+#[test]
 fn selected_engine_applies_msdelta_output() {
     let sel = DeltaEngine::select(None).unwrap();
     assert!(sel.label().starts_with("system:"), "{}", sel.label());

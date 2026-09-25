@@ -179,6 +179,10 @@ impl DeltaEngine {
                     windows::core::Error::from_thread()
                 )));
             }
+            if out.start.is_null() {
+                // 成功但輸出為空（例如 source 與 delta 套用後結果為零位元組）：無記憶體可釋放。
+                return Ok(Vec::new());
+            }
             let v = std::slice::from_raw_parts(out.start as *const u8, out.size).to_vec();
             (self.free)(out.start);
             Ok(v)
@@ -216,6 +220,10 @@ impl DeltaEngine {
                     "CreateDeltaB failed ({})",
                     windows::core::Error::from_thread()
                 )));
+            }
+            if out.start.is_null() {
+                // 成功但輸出為空：無記憶體可釋放。
+                return Ok(Vec::new());
             }
             let v = std::slice::from_raw_parts(out.start as *const u8, out.size).to_vec();
             (self.free)(out.start);
