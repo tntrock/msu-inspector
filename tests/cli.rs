@@ -86,6 +86,11 @@ fn prints_text_summary_by_default() {
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("KB5129195"), "{text}");
     assert!(text.contains("DRV_BOOT_START"), "{text}");
+    let expected = msu_inspector::core::export::warning_message(
+        msu_inspector::core::model::WarningCode::SignatureNotValid,
+        msu_inspector::i18n::Lang::ZhTw,
+    );
+    assert!(text.contains(expected), "{text}");
 }
 
 #[test]

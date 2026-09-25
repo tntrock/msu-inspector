@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::core::analyze::{analyze, AnalyzeOptions};
-use crate::core::export::{build, now_rfc3339, to_json_string, Detail, ExportOptions};
+use crate::core::export::{
+    build, now_rfc3339, to_json_string, warning_message, Detail, ExportOptions,
+};
 use crate::core::model::{ActionKind, AnalysisReport, Risk};
 use crate::core::progress::Ctx;
 use crate::core::risk;
@@ -224,7 +226,13 @@ pub fn summary_text(report: &AnalysisReport, lang: Lang) -> String {
     }
     let _ = writeln!(s, "{}: {}", t.warnings, report.warnings.len());
     for w in &report.warnings {
-        let _ = writeln!(s, "  {} {}", w.subject, w.detail);
+        let _ = writeln!(
+            s,
+            "  {}: {} ({})",
+            warning_message(w.code, lang),
+            w.subject,
+            w.detail
+        );
     }
     s
 }
