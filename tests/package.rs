@@ -110,3 +110,38 @@ fn selects_top_level_package() {
     let p = select_package(&[], Some("KB1"), BTreeMap::new());
     assert_eq!(p.kb.as_deref(), Some("KB1"));
 }
+
+fn update_mum(vpath: &str, identifier: &str, name: &str) -> MumInfo {
+    let mut m = MumInfo {
+        file_name: "update.mum".into(),
+        vpath: vpath.into(),
+        identifier: Some(identifier.into()),
+        ..Default::default()
+    };
+    m.identity.name = name.into();
+    m
+}
+
+#[test]
+fn prefers_update_mum_matching_kb_and_outside_ssu() {
+    let ssu = update_mum("x.msu/SSU-26100.1-x64.cab/update.mum", "KB5000001", "SSU");
+    let lcu = update_mum(
+        "x.msu/Windows11.0-KB5099999-x64.cab/update.mum",
+        "KB5099999",
+        "LCU",
+    );
+    // identifier 與檔名 KB 相符者優先，與順序無關
+    let p = select_package(
+        &[ssu.clone(), lcu.clone()],
+        Some("KB5099999"),
+        BTreeMap::new(),
+    );
+    assert_eq!(p.identity.name, "LCU");
+    // 沒有 KB 提示時，不在 SSU- 容器下者優先
+    let p = select_package(&[ssu.clone(), lcu.clone()], None, BTreeMap::new());
+    assert_eq!(p.identity.name, "LCU");
+    // 同樣都相符時，仍避開 SSU
+    let ssu_same = update_mum("x.msu/ssu-26100.1-x64.cab/update.mum", "KB5099999", "SSU");
+    let p = select_package(&[ssu_same, lcu], Some("KB5099999"), BTreeMap::new());
+    assert_eq!(p.identity.name, "LCU");
+}

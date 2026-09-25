@@ -250,3 +250,46 @@ fn skips_psf_when_manifests_already_found() {
     assert!(c.psfs.is_empty());
     assert_eq!(names(&c.manifests), vec!["b.manifest"]);
 }
+
+#[test]
+fn keeps_update_mum_from_every_container() {
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path();
+    let ssu = common::make_cab(
+        d,
+        "SSU-26100.1-x64.cab",
+        &[("update.mum", b"<assembly/>")],
+        false,
+    );
+    let lcu = common::make_cab(
+        d,
+        "Windows11.0-KB5099999-x64.cab",
+        &[
+            ("update.mum", b"<assembly/>"),
+            ("a.manifest", b"<assembly/>"),
+        ],
+        false,
+    );
+    let msu = common::make_cab(
+        d,
+        "Windows11.0-KB5099999-x64.msu",
+        &[
+            ("SSU-26100.1-x64.cab", &std::fs::read(&ssu).unwrap()),
+            (
+                "Windows11.0-KB5099999-x64.cab",
+                &std::fs::read(&lcu).unwrap(),
+            ),
+        ],
+        false,
+    );
+    let c = collect(&msu, &d.join("work"), &Ctx::silent()).unwrap();
+    let mut vpaths: Vec<&str> = c.mums.iter().map(|m| m.vpath.as_str()).collect();
+    vpaths.sort();
+    assert_eq!(
+        vpaths,
+        vec![
+            "Windows11.0-KB5099999-x64.msu/SSU-26100.1-x64.cab/update.mum",
+            "Windows11.0-KB5099999-x64.msu/Windows11.0-KB5099999-x64.cab/update.mum",
+        ]
+    );
+}

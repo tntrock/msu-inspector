@@ -9,6 +9,8 @@ use crate::core::CoreError;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MumInfo {
     pub file_name: String,
+    /// 容器內的虛擬路徑（`外層/內層/檔名`）；由呼叫端填入，用於辨識 SSU 容器
+    pub vpath: String,
     pub identity: AssemblyIdentity,
     pub identifier: Option<String>,
     pub release_type: Option<String>,
@@ -104,8 +106,17 @@ fn eq_kb(a: Option<&str>, b: Option<&str>) -> bool {
     matches!((a, b), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b))
 }
 
-/// 選出頂層套件：`update.mum` → `Package_for_*` 且 identifier 與 KB 相符 →
-/// identifier 相符 → 參照最多子套件 / 元件者。
+/// 是否位於 `SSU-*` 容器（服務堆疊更新）之下。
+fn under_ssu(vpath: &str) -> bool {
+    vpath
+        .split('/')
+        .rev()
+        .skip(1)
+        .any(|seg| seg.to_ascii_lowercase().starts_with("ssu-"))
+}
+
+/// 選出頂層套件：`update.mum`（identifier 與 KB 相符者優先，其次不在 SSU 容器下者）→
+/// `Package_for_*` 且 identifier 與 KB 相符 → identifier 相符 → 參照最多子套件 / 元件者。
 pub fn select_package(
     mums: &[MumInfo],
     kb_hint: Option<&str>,
@@ -113,7 +124,14 @@ pub fn select_package(
 ) -> PackageInfo {
     let top = mums
         .iter()
-        .find(|m| m.file_name.eq_ignore_ascii_case("update.mum"))
+        .filter(|m| m.file_name.eq_ignore_ascii_case("update.mum"))
+        // min_by_key 在同分時取第一個，保留原本順序
+        .min_by_key(|m| {
+            (
+                !eq_kb(m.identifier.as_deref(), kb_hint),
+                under_ssu(&m.vpath),
+            )
+        })
         .or_else(|| {
             mums.iter().find(|m| {
                 m.identity

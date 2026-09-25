@@ -17,6 +17,10 @@ fn classifies_entry_names() {
         role_of("Windows10.0-KB5005565-x64-pkgProperties.txt"),
         Role::PkgProperties
     );
+    assert_eq!(
+        role_of("Windows11.0-KB5043080-x64-pkgProperties_PSFX.txt"),
+        Role::PkgProperties
+    );
     assert_eq!(role_of("express.psf.cix.xml"), Role::PsfIndex);
     assert_eq!(role_of("inner.cab"), Role::NestedCab);
     assert_eq!(role_of("Windows11.0-KB1-x64.wim"), Role::NestedWim);

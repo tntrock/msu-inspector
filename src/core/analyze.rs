@@ -117,7 +117,10 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
             .and_then(|b| decode_text(&b))
             .and_then(|t| parse_mum(&item.name, &t));
         match parsed {
-            Ok(m) => mums.push(m),
+            Ok(mut m) => {
+                m.vpath = item.vpath.clone();
+                mums.push(m)
+            }
             Err(e) => warnings.push(Warning::new(
                 WarningCode::MumParseFailed,
                 &item.vpath,

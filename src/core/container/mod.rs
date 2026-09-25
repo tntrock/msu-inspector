@@ -47,10 +47,8 @@ pub fn role_of(base_name: &str) -> Role {
         Role::Mum
     } else if n.ends_with(".psf.cix.xml") {
         Role::PsfIndex
-    } else if n == "pkgproperties.txt"
-        || n.ends_with("-pkgproperties.txt")
-        || n.ends_with("_pkgproperties.txt")
-    {
+    } else if n.contains("pkgproperties") && n.ends_with(".txt") {
+        // 例：`…-pkgProperties.txt`、`…-pkgProperties_PSFX.txt`
         Role::PkgProperties
     } else if n.ends_with(".cab") {
         Role::NestedCab
@@ -165,9 +163,14 @@ pub struct Collected {
 }
 
 impl Collected {
-    /// manifest / .mum 依檔名（不分大小寫）去重。
+    /// manifest 依檔名、.mum 依完整虛擬路徑（皆不分大小寫）去重：
+    /// SSU + LCU 合併套件的每個容器都有自己的 `update.mum`，都要保留給 select_package 挑選。
     fn add_unique(&mut self, item: Item, role: Role) {
-        if !self.seen.insert(item.name.to_ascii_lowercase()) {
+        let key = match role {
+            Role::Mum => format!("mum:{}", item.vpath.to_ascii_lowercase()),
+            _ => item.name.to_ascii_lowercase(),
+        };
+        if !self.seen.insert(key) {
             return;
         }
         match role {
