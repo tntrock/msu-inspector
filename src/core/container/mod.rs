@@ -5,10 +5,14 @@ pub mod psf;
 pub mod wim;
 
 use std::borrow::Cow;
+use std::collections::{HashSet, VecDeque};
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use super::model::ContainerFormat;
+use super::delta::DeltaEngine;
+use super::model::{ContainerFormat, ContainerInfo, Warning, WarningCode};
+use super::progress::{Ctx, Progress};
 use super::CoreError;
 
 /// 容器中檔案的用途，依檔名判斷。
@@ -121,4 +125,233 @@ pub fn sniff(path: &Path) -> Result<Option<ContainerFormat>, CoreError> {
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("psf"));
     Ok(is_psf.then_some(ContainerFormat::Psf))
+}
+
+/// 更新掃描用的中繼資料，與安裝動作無關。
+const SCAN_METADATA: &str = "wsusscan.cab";
+/// 安裝工具（DesktopDeployment*.cab）：只取 UpdateCompression.dll，不收 manifest。
+const TOOLING_PREFIX: &str = "desktopdeployment";
+
+#[derive(Debug, Default)]
+pub struct Collected {
+    pub outer: Option<ContainerFormat>,
+    pub manifests: Vec<Item>,
+    pub mums: Vec<Item>,
+    pub pkg_properties: Option<Vec<u8>>,
+    pub psf_indexes: Vec<Item>,
+    pub psfs: Vec<Item>,
+    pub package_dll: Option<PathBuf>,
+    pub containers: Vec<ContainerInfo>,
+    pub warnings: Vec<Warning>,
+    /// 有 PSF 因過濾而未展開
+    pub saw_psf: bool,
+    seen: HashSet<String>,
+}
+
+impl Collected {
+    /// manifest / .mum 依檔名（不分大小寫）去重。
+    fn add_unique(&mut self, item: Item, role: Role) {
+        if !self.seen.insert(item.name.to_ascii_lowercase()) {
+            return;
+        }
+        match role {
+            Role::Manifest => self.manifests.push(item),
+            Role::Mum => self.mums.push(item),
+            _ => {}
+        }
+    }
+}
+
+pub fn collect(path: &Path, work: &Path, ctx: &Ctx) -> Result<Collected, CoreError> {
+    let first = collect_pass(path, &work.join("pass1"), ctx, false)?;
+    if first.manifests.is_empty() && first.saw_psf {
+        let mut second = collect_pass(path, &work.join("pass2"), ctx, true)?;
+        second.saw_psf = true;
+        return Ok(second);
+    }
+    Ok(first)
+}
+
+fn collect_pass(
+    path: &Path,
+    work: &Path,
+    ctx: &Ctx,
+    want_psf: bool,
+) -> Result<Collected, CoreError> {
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let outer = match sniff(path)? {
+        Some(f @ (ContainerFormat::Cab | ContainerFormat::Wim)) => f,
+        _ => return Err(CoreError::UnsupportedFormat(file_name)),
+    };
+    let mut c = Collected {
+        outer: Some(outer),
+        ..Default::default()
+    };
+    let cancel = ctx.cancel_flag();
+    let mut queue = VecDeque::from([(path.to_path_buf(), file_name, outer, false)]);
+    let mut n = 0usize;
+    while let Some((p, vpath, fmt, tooling)) = queue.pop_front() {
+        ctx.check()?;
+        ctx.report(Progress::Unpacking {
+            container: vpath.clone(),
+        });
+        n += 1;
+        let out = work.join(format!("c{n:04}"));
+        std::fs::create_dir_all(&out).map_err(|e| CoreError::io(&out, e))?;
+        let want = |r: Role| {
+            if tooling {
+                r == Role::PackageDll
+            } else {
+                r != Role::Psf || want_psf
+            }
+        };
+        let result = match fmt {
+            ContainerFormat::Cab => cab::extract(&p, &vpath, &out, &cancel, &want),
+            ContainerFormat::Wim => wim::extract(&p, &vpath, &out, &cancel, &want),
+            ContainerFormat::Psf => unreachable!("PSF is resolved separately"),
+        };
+        let ex = match result {
+            Ok(ex) => ex,
+            Err(e @ (CoreError::Cancelled | CoreError::NeedsElevation(_))) => return Err(e),
+            Err(e) if n == 1 => return Err(e),
+            Err(e) => {
+                c.warnings.push(Warning::new(
+                    WarningCode::ContainerFailed,
+                    &vpath,
+                    e.to_string(),
+                ));
+                c.containers.push(ContainerInfo {
+                    path: vpath,
+                    format: fmt,
+                    skipped: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+        c.containers.push(ContainerInfo {
+            path: vpath.clone(),
+            format: fmt,
+            skipped: None,
+        });
+        if ex.skipped.iter().any(|(_, r)| *r == Role::Psf) {
+            c.saw_psf = true;
+        }
+        for item in ex.items {
+            let role = role_of(&item.name);
+            match role {
+                Role::Manifest | Role::Mum => c.add_unique(item, role),
+                Role::PkgProperties => {
+                    if c.pkg_properties.is_none() {
+                        c.pkg_properties = Some(item.bytes()?.into_owned());
+                    }
+                }
+                Role::PsfIndex => c.psf_indexes.push(item),
+                Role::Psf => c.psfs.push(item),
+                Role::PackageDll => {
+                    if c.package_dll.is_none() {
+                        c.package_dll = item.path().map(Path::to_path_buf);
+                    }
+                }
+                Role::NestedCab | Role::NestedWim => {
+                    let Some(fp) = item.path().map(Path::to_path_buf) else {
+                        continue;
+                    };
+                    let lname = item.name.to_ascii_lowercase();
+                    let nested = match sniff(&fp)? {
+                        Some(f @ (ContainerFormat::Cab | ContainerFormat::Wim)) => f,
+                        _ if role == Role::NestedCab => ContainerFormat::Cab,
+                        _ => ContainerFormat::Wim,
+                    };
+                    if lname == SCAN_METADATA {
+                        let _ = std::fs::remove_file(&fp);
+                        c.containers.push(ContainerInfo {
+                            path: item.vpath,
+                            format: nested,
+                            skipped: Some("scan metadata".into()),
+                        });
+                        continue;
+                    }
+                    queue.push_back((fp, item.vpath, nested, lname.starts_with(TOOLING_PREFIX)));
+                }
+                Role::Ignore => {}
+            }
+        }
+        // 巢狀容器展開後即刪除，節省暫存空間（使用者的原始檔不動）
+        if n > 1 {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+    Ok(c)
+}
+
+/// 從已展開的 PSF 取出 manifest / .mum。索引優先用同名 `*.psf.cix.xml`，
+/// 其次 `express.psf.cix.xml`，都沒有時讀檔頭內嵌索引。
+pub fn resolve_psfs(c: &mut Collected, engine: &DeltaEngine, ctx: &Ctx) -> Result<(), CoreError> {
+    for psf_item in std::mem::take(&mut c.psfs) {
+        ctx.check()?;
+        let Some(path) = psf_item.path().map(Path::to_path_buf) else {
+            continue;
+        };
+        ctx.report(Progress::Unpacking {
+            container: psf_item.vpath.clone(),
+        });
+        let own_index = format!("{}.cix.xml", psf_item.name.to_ascii_lowercase());
+        let sidecar = c
+            .psf_indexes
+            .iter()
+            .find(|i| i.name.to_ascii_lowercase() == own_index)
+            .or_else(|| {
+                c.psf_indexes
+                    .iter()
+                    .find(|i| i.name.eq_ignore_ascii_case("express.psf.cix.xml"))
+            })
+            .map(|i| i.bytes().map(Cow::into_owned))
+            .transpose()?;
+        let entries = match psf::load_index(&path, sidecar.as_deref(), engine) {
+            Ok(e) => e,
+            Err(e) => {
+                c.warnings.push(Warning::new(
+                    WarningCode::PsfFailed,
+                    &psf_item.vpath,
+                    e.to_string(),
+                ));
+                c.containers.push(ContainerInfo {
+                    path: psf_item.vpath.clone(),
+                    format: ContainerFormat::Psf,
+                    skipped: Some(e.to_string()),
+                });
+                continue;
+            }
+        };
+        c.containers.push(ContainerInfo {
+            path: psf_item.vpath.clone(),
+            format: ContainerFormat::Psf,
+            skipped: None,
+        });
+        let mut file = File::open(&path).map_err(|e| CoreError::io(&path, e))?;
+        for entry in entries {
+            let base = entry
+                .name
+                .rsplit(['\\', '/'])
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let role = role_of(&base);
+            if !matches!(role, Role::Manifest | Role::Mum) {
+                continue;
+            }
+            let vpath = format!("{}/{}", psf_item.vpath, entry.name.replace('\\', "/"));
+            match psf::read_entry(&mut file, &entry, engine) {
+                Ok(bytes) => c.add_unique(Item::new(vpath, ItemData::Bytes(bytes)), role),
+                Err(e) => {
+                    c.warnings
+                        .push(Warning::new(WarningCode::PsfFailed, vpath, e.to_string()))
+                }
+            }
+        }
+    }
+    Ok(())
 }
