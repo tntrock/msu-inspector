@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v3" manifestVersion="1.0">
+  <assemblyIdentity name="Test-Actions" version="10.0.26100.1742" processorArchitecture="amd64" language="neutral" buildType="release" publicKeyToken="31bf3856ad364e35" />
+  <file name="acpiex.sys" destinationPath="$(runtime.drivers)\" sourceName="acpiex.sys" />
+  <file name="dmcertinst.exe" destinationPath="$(runtime.system32)\" sourceName="dmcertinst.exe" />
+  <file name="helper.sys" destinationPath="$(runtime.drivers)\" sourceName="helper.sys" />
+  <memberships>
+    <categoryMembership>
+      <id name="Microsoft.Windows.Categories" version="1.0.0.0" publicKeyToken="365143bb27e7ac8b" typeName="BootCritical" />
+    </categoryMembership>
+    <categoryMembership>
+      <id name="Microsoft.Windows.Categories.Services" version="10.0.26100.1742" publicKeyToken="31bf3856ad364e35" typeName="Service" />
+      <categoryInstance subcategory="acpiex">
+        <serviceData name="acpiex" displayName="Microsoft ACPIEx Driver" errorControl="critical" start="boot" type="kernelDriver" group="Boot Bus Extender" imagePath="System32\Drivers\acpiex.sys" tag="7" />
+      </categoryInstance>
+      <categoryInstance subcategory="AppReadiness">
+        <serviceData name="AppReadiness" displayName="App Readiness" start="demand" type="win32ShareProcess" imagePath="%SystemRoot%\System32\svchost.exe -k AppReadiness -p" objectName="LocalSystem" requiredPrivileges="SeImpersonatePrivilege,SeTcbPrivilege" dependOnService="RpcSs" />
+      </categoryInstance>
+    </categoryMembership>
+  </memberships>
+  <taskScheduler>
+    <Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+      <RegistrationInfo>
+        <URI>\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser</URI>
+      </RegistrationInfo>
+      <Triggers>
+        <TimeTrigger id="NightlyTrigger"><StartBoundary>2008-09-01T03:00:00</StartBoundary></TimeTrigger>
+        <BootTrigger />
+      </Triggers>
+      <Principals>
+        <Principal id="LocalSystem"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal>
+      </Principals>
+      <Actions Context="LocalSystem">
+        <Exec><Command>%windir%\system32\compattelrunner.exe</Command><Arguments>-m:appraiser.dll</Arguments></Exec>
+        <ComHandler><ClassId>{01575CFE-9A55-4003-A5E1-F38D1EBDCBE1}</ClassId></ComHandler>
+      </Actions>
+    </Task>
+  </taskScheduler>
+  <genericCommands>
+    <genericCommand arguments="/install ASPNET" executableName="$(runtime.system32)\inetsrv\iissetup.exe" />
+    <genericCommand arguments="/uninstall ASPNET" executableName="$(runtime.system32)\inetsrv\iissetup.exe" install="false" />
+  </genericCommands>
+  <firewallRule Action="Allow" Active="TRUE" Binary="%SystemRoot%\system32\dmcertinst.exe" Dir="Out" LPort="49152-65535" Name="@FirewallAPI.dll,-37507" Protocol="TCP" internalName="Microsoft-Windows-DeviceManagement-CertificateInstall-TCP-Out" />
+  <registryKeys>
+    <registryKey keyName="HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\RestrictedServices\Static\System">
+      <registryValue name="DeviceManagement-4" valueType="REG_SZ" value="V2.0|Action=Block|Dir=in|App=%SystemRoot%\System32\dmcertinst.exe|Name=Block inbound traffic to dmcertinst.exe|" />
+    </registryKey>
+  </registryKeys>
+  <mof name="$(runtime.wbem)\Microsoft.AppV.AppVClientWmi.mof" uninstallmof="$(runtime.wbem)\Remove.Microsoft.AppV.AppvClientWmi.mof" />
+  <instrumentation xmlns:win="http://manifests.microsoft.com/win/2004/08/windows/events">
+    <events xmlns="http://schemas.microsoft.com/win/2004/08/events">
+      <provider guid="{1E2462BE-B025-48DA-8C1F-7B60B8CCAE53}" name="Microsoft-Windows-AppModel-MessagingDataModel" />
+    </events>
+  </instrumentation>
+  <fveUpdateAI fveCommand="bootmgr" />
+  <bfsvc Flags="17" Source="$(runtime.windows)\boot" />
+  <networkComponents>
+    <filterDriver identifier="ms_l1vhlwf" />
+  </networkComponents>
+  <asmv3:configuration xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+    <configurationSchema />
+  </asmv3:configuration>
+</assembly>
