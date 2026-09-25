@@ -3,4 +3,5 @@
 pub mod cli;
 pub mod core;
 pub mod elevation;
+pub mod gui;
 pub mod i18n;
