@@ -4,6 +4,7 @@ pub mod analyze;
 pub mod container;
 pub mod delta;
 pub mod error;
+pub mod export;
 pub mod local;
 pub mod manifest;
 pub mod model;
