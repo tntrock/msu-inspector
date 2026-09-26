@@ -349,7 +349,9 @@ impl RegValue {
 }
 
 fn utf16_units(buf: &[u8]) -> Vec<u16> {
-    buf.chunks_exact(2)
+    buf.as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect()
 }

@@ -158,7 +158,9 @@ impl Reader<'_> {
                 .get(DENTRY_FIXED..DENTRY_FIXED + name_len)
                 .ok_or_else(|| self.err("corrupt WIM file name"))?;
             let units: Vec<u16> = name_bytes
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect();
             let name = String::from_utf16_lossy(&units);
@@ -283,8 +285,8 @@ pub fn extract(
     let table_res = resource_at(&head, 48).ok_or_else(|| r.err("bad WIM header"))?;
     let table = r.read_resource(&table_res, MAX_TABLE)?;
     let mut images = Vec::new();
-    for entry in table.chunks_exact(LOOKUP_ENTRY) {
-        let Some(res) = resource_at(entry, 0) else {
+    for entry in table.as_chunks::<LOOKUP_ENTRY>().0 {
+        let Some(res) = resource_at(entry.as_slice(), 0) else {
             continue;
         };
         let hash: [u8; 20] = entry[30..50].try_into().unwrap_or([0; 20]);
