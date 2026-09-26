@@ -39,6 +39,35 @@ impl Role {
     }
 }
 
+/// WinSxS keyform 資料夾名稱：`arch_名稱_token(16 hex)_版本_語系_雜湊(16 hex)`。
+fn is_component_dir(segment: &str) -> bool {
+    let parts: Vec<&str> = segment.split('_').collect();
+    let n = parts.len();
+    let hex16 = |s: &str| s.len() == 16 && s.bytes().all(|b| b.is_ascii_hexdigit());
+    n >= 6
+        && hex16(parts[n - 4])
+        && hex16(parts[n - 1])
+        && super::model::parse_version(parts[n - 3]).is_some()
+}
+
+/// 依容器內的完整路徑判斷用途。位於元件資料夾中的檔案（例如 Win10 LCU 的 bootos.wim、
+/// `f/application.manifest`）都是要安裝到系統的 payload，不是套件容器或元件 manifest，一律略過。
+pub fn role_at(inner_path: &str) -> Role {
+    let segments: Vec<&str> = inner_path
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty())
+        .collect();
+    let Some((base, dirs)) = segments.split_last() else {
+        return Role::Ignore;
+    };
+    let role = role_of(base);
+    if dirs.iter().any(|d| is_component_dir(d)) {
+        Role::Ignore
+    } else {
+        role
+    }
+}
+
 pub fn role_of(base_name: &str) -> Role {
     let n = base_name.to_ascii_lowercase();
     if n.ends_with(".manifest") {
@@ -264,7 +293,7 @@ fn collect_pass(
             c.saw_psf = true;
         }
         for item in ex.items {
-            let role = role_of(&item.name);
+            let role = role_at(&item.vpath);
             match role {
                 Role::Manifest | Role::Mum => c.add_unique(item, role),
                 Role::PkgProperties => {
@@ -364,13 +393,7 @@ pub fn resolve_psfs(c: &mut Collected, engine: &DeltaEngine, ctx: &Ctx) -> Resul
                 ctx.report(Progress::Decoding { done: i, total });
             }
             ctx.check()?;
-            let base = entry
-                .name
-                .rsplit(['\\', '/'])
-                .next()
-                .unwrap_or("")
-                .to_string();
-            let role = role_of(&base);
+            let role = role_at(&entry.name);
             if !matches!(role, Role::Manifest | Role::Mum) {
                 continue;
             }

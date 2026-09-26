@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::core::{HSTRING, PCWSTR};
 
-use super::{is_reparse_point, is_within, role_of, Extracted, Item, ItemData, Role};
+use super::{is_reparse_point, is_within, role_at, Extracted, Item, ItemData, Role};
 use crate::core::CoreError;
 
 type Handle = *mut c_void;
@@ -105,10 +105,10 @@ unsafe extern "system" fn on_message(
     if !looks_like_file(&name) {
         return WIM_MSG_SUCCESS; // 目錄或無副檔名的檔案：保留
     }
-    let role = role_of(&name);
+    let vpath = vpath_of(ctx, full);
+    let role = role_at(&vpath);
     if role == Role::Ignore || !(ctx.want)(role) {
         if role != Role::Ignore {
-            let vpath = vpath_of(ctx, full);
             ctx.skipped.push((vpath, role));
         }
         // SAFETY: lParam points to a BOOL owned by wimgapi for the duration of this
@@ -262,11 +262,6 @@ pub fn collect_files(
         if !meta.is_file() {
             continue;
         }
-        let name = e.file_name().to_string_lossy().into_owned();
-        let role = role_of(&name);
-        if role == Role::Ignore || !want(role) {
-            continue;
-        }
         let rel: Vec<String> = path
             .strip_prefix(root)
             .unwrap_or(&path)
@@ -275,6 +270,10 @@ pub fn collect_files(
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
             .collect();
         let vpath = format!("{vprefix}/{}", rel.join("/"));
+        let role = role_at(&vpath);
+        if role == Role::Ignore || !want(role) {
+            continue;
+        }
         let data = if role.to_disk() {
             ItemData::File(path)
         } else {

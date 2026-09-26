@@ -28,6 +28,9 @@ const STRUCTURAL: &[&str] = &[
     "noInheritable",
     "mvid",
     "application",
+    "runtime",
+    "description",
+    "deconstructionTool",
 ];
 
 const PE_EXTENSIONS: &[&str] = &[
@@ -50,6 +53,10 @@ const ADVANCED_INSTALLERS: &[&str] = &[
     "MsmqAdIntegrationOnlineInstall",
     "pbr",
     "msdtc",
+    "installerRegistrations",
+    "Transforms",
+    "firewallGroupActivation",
+    "cleanupCache",
 ];
 
 const DRIVER_SERVICE_TYPES: &[&str] = &["kernelDriver", "fileSystemDriver", "recognizerDriver"];

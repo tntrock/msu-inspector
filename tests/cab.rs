@@ -249,3 +249,25 @@ fn oversized_in_memory_item_is_rejected() {
     };
     assert!(detail.contains("too large"), "{detail}");
 }
+
+#[test]
+fn component_payload_containers_are_ignored() {
+    use msu_inspector::core::container::role_at;
+    let comp =
+        "amd64_microsoft-windows-ptp-bootos_31bf3856ad364e35_10.0.19041.7725_none_4a9456e64d9847d8";
+    assert_eq!(
+        role_at(&format!("x.msu/kb.cab/{comp}/bootos.wim")),
+        Role::Ignore
+    );
+    assert_eq!(role_at(&format!("{comp}/sub/inner.cab")), Role::Ignore);
+    assert_eq!(role_at(&format!("{comp}/f/x.psf")), Role::Ignore);
+    // 元件資料夾外的容器與 manifest 照常
+    assert_eq!(role_at("x.msu/Windows10.0-KB1-x64.cab"), Role::NestedCab);
+    assert_eq!(role_at("x.msu/Cab_1_for_KB1.cab"), Role::NestedCab);
+    assert_eq!(
+        role_at(&format!("{comp}/f/application.manifest")),
+        Role::Ignore
+    );
+    assert_eq!(role_at("x.msu/kb.cab/amd64_foo.manifest"), Role::Manifest);
+    assert_eq!(role_at("SSU-19041.1-x64.cab"), Role::NestedCab);
+}

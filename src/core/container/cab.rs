@@ -18,7 +18,7 @@ use windows::Win32::Storage::Cabinets::{
 };
 use windows::Win32::System::Memory::{GetProcessHeap, HeapAlloc, HeapFree, HEAP_FLAGS};
 
-use super::{role_of, Extracted, Item, ItemData, Role};
+use super::{role_at, Extracted, Item, ItemData, Role};
 use crate::core::CoreError;
 
 /// 留在記憶體的單一項目上限（位元組）；超過即以 Container 錯誤中止該 CAB。
@@ -327,7 +327,7 @@ unsafe extern "system" fn fdi_notify(
             let inner = String::from_utf8_lossy(raw).replace('\\', "/");
             let base = inner.rsplit('/').next().unwrap_or(&inner).to_string();
             let vpath = format!("{}/{inner}", ctx.vprefix);
-            let role = role_of(&base);
+            let role = role_at(&inner);
             if role == Role::Ignore {
                 return 0;
             }

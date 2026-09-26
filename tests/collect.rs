@@ -379,3 +379,39 @@ fn second_pass_removes_first_pass_and_keeps_package_dll() {
     let dll = c.package_dll.expect("UpdateCompression.dll path");
     assert_eq!(std::fs::read(dll).unwrap(), b"MZ-fake");
 }
+
+#[test]
+fn payload_containers_inside_component_folders_are_not_unpacked() {
+    // Win10 / Server LCU 的元件資料夾內含 bootos.wim 等「要安裝的檔案」，不是套件容器
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path();
+    let comp =
+        "amd64_microsoft-windows-ptp-bootos_31bf3856ad364e35_10.0.19041.7725_none_4a9456e64d9847d8";
+    let inner = common::make_cab(
+        d,
+        "kb.cab",
+        &[
+            ("update.mum", b"<assembly/>"),
+            ("a.manifest", b"<assembly/>"),
+            (&format!("{comp}\\bootos.wim"), b"MSWIM\0\0\0garbage"),
+            (&format!("{comp}\\inner.cab"), b"MSCF truncated"),
+        ],
+        false,
+    );
+    let msu = common::make_cab(
+        d,
+        "x.msu",
+        &[("kb.cab", &std::fs::read(&inner).unwrap())],
+        false,
+    );
+    let c = collect(&msu, &d.join("work"), &Ctx::silent()).unwrap();
+    assert_eq!(names(&c.manifests), vec!["a.manifest"]);
+    assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+    assert!(
+        !c.containers
+            .iter()
+            .any(|i| i.path.contains("bootos.wim") || i.path.ends_with("inner.cab")),
+        "{:?}",
+        c.containers
+    );
+}
