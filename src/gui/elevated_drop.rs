@@ -15,13 +15,14 @@ use windows::Win32::UI::Shell::{
     DefSubclassProc, DragAcceptFiles, DragFinish, DragQueryFileW, SetWindowSubclass, HDROP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    ChangeWindowMessageFilterEx, EnumThreadWindows, IsWindowVisible, MSGFLT_ALLOW, WM_COPYDATA,
-    WM_DROPFILES,
+    ChangeWindowMessageFilterEx, EnumThreadWindows, GetClassNameW, IsWindowVisible, MSGFLT_ALLOW,
+    WM_COPYDATA, WM_DROPFILES,
 };
 
 /// 未公開於 windows crate 的 WM_COPYGLOBALDATA；UIPI 下拖放必須一併放行。
 const WM_COPYGLOBALDATA: u32 = 0x0049;
 const SUBCLASS_ID: usize = 0x4D53_5549; // "MSUI"
+const WINIT_EVENT_TARGET_CLASS: &str = "Winit Thread Event Target";
 
 static DROPPED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 static REPAINT: OnceLock<egui::Context> = OnceLock::new();
@@ -29,9 +30,13 @@ static REPAINT: OnceLock<egui::Context> = OnceLock::new();
 /// 在目前執行緒找出第一個可見的頂層視窗（eframe 的主視窗建立在 GUI 執行緒上）。
 fn main_window() -> Option<HWND> {
     unsafe extern "system" fn pick(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        // SAFETY: lparam 指向呼叫端堆疊上的 Option<HWND>，列舉期間有效。
+        // SAFETY: lparam 指向呼叫端堆疊上的 Option<HWND>，列舉期間有效；類別名稱緩衝區長度正確。
         unsafe {
-            if IsWindowVisible(hwnd).as_bool() {
+            let mut class = [0u16; 64];
+            let n = GetClassNameW(hwnd, &mut class) as usize;
+            // winit 另有一個收發內部訊息的「Winit Thread Event Target」視窗，不是應用程式主視窗
+            let internal = String::from_utf16_lossy(&class[..n]) == WINIT_EVENT_TARGET_CLASS;
+            if !internal && IsWindowVisible(hwnd).as_bool() {
                 *(lparam.0 as *mut Option<HWND>) = Some(hwnd);
                 return BOOL(0); // 找到了，停止列舉
             }
