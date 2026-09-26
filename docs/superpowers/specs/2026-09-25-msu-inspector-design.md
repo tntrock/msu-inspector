@@ -167,12 +167,14 @@ core 不依賴 GUI，可獨立測試。
 | `firewall_rule` | `<firewallRule>` 元素，以及 `...\FirewallPolicy\FirewallRules` / `RestrictedServices` 下的登錄值 | 方向、程式、連接埠、協定、動作 |
 | `wmi_mof` | `<mof>` | MOF 檔、反安裝 MOF |
 | `etw_eventlog` | `<instrumentation>` | 提供者名稱、GUID |
-| `advanced_installer` | 安裝時會執行自訂程式碼的元素：名稱以 `AI` 結尾者（`fveUpdateAI`、`HTTPAI`…）、`bfsvc`、`SecureBoot`、`appxRegistration`、`networkComponents`、`unattendActions`、`sppInstaller` 等 | 元素名稱、全部屬性 |
+| `advanced_installer` | 安裝時會執行自訂程式碼的元素：名稱以 `AI` 結尾者（`fveUpdateAI`、`HTTPAI`…）、`bfsvc`、`SecureBoot`、`appxRegistration`、`networkComponents`、`unattendActions`、`sppInstaller`、`installerRegistrations`、`Transforms`、`firewallGroupActivation`、`cleanupCache` 等 | 元素名稱、全部屬性 |
 | `directory` | `<directories>` | 路徑、SDDL 名稱 |
 | `setting` | SMI `<configuration>` | 設定名稱 |
 | `unknown` | 未辨識的元素 | 保留原始 XML 片段，不丟棄 |
 
-不視為動作的結構性元素：`assemblyIdentity`、`dependency`、`trustInfo`、`localization`、`deployment`、`migration`、`rescache`、`languagePack`、`imaging`、`feature`、`categoryDefinitions`、`satelliteCategory`、`languageCategory`、`containsSettings`、`compatibility`、`noInheritable`、`mvid`。`memberships` 只擷取服務與類別（`typeName`），不另列為動作。
+不視為動作的結構性元素：`assemblyIdentity`、`dependency`、`trustInfo`、`localization`、`deployment`、`migration`、`rescache`、`languagePack`、`imaging`、`feature`、`categoryDefinitions`、`satelliteCategory`、`languageCategory`、`containsSettings`、`compatibility`、`noInheritable`、`mvid`、`application`、`runtime`（.NET）、`description`、`deconstructionTool`。`memberships` 只擷取服務與類別（`typeName`），不另列為動作。
+
+位於元件資料夾（WinSxS keyform 名稱）內的檔案，例如 `bootos.wim`、`f/application.manifest`，是要安裝的 payload，不當成容器或元件 manifest 處理。
 
 檔案沒有個別版本欄位；檔案的「新版本」一律以所屬元件的 `assemblyIdentity` 版本表示。
 

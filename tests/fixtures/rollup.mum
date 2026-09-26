@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v3" manifestVersion="1.0" description="Fix for KB5129195" displayName="default" company="Microsoft Corporation" copyright="Microsoft Corporation" supportInformation="https://support.microsoft.com/help/5129195" creationTimeStamp="2026-09-12T21:27:54Z" lastUpdateTimeStamp="2026-09-12T21:27:54Z">
+  <assemblyIdentity name="Package_for_RollupFix" version="26100.9457.1.0" processorArchitecture="amd64" language="neutral" publicKeyToken="31bf3856ad364e35" />
+  <package identifier="KB5129195" releaseType="Security Update" restart="possible">
+    <mum2:customInformation Version="10.0.26100.9457" xmlns:mum2="urn:schemas-microsoft-com:asm.v3" PackageFormat="PSFX" PSFXVersion="2" PSFXDeltaFormat="ForwardOnly" />
+    <parent revisionCompare="GE" integrate="standalone" disposition="detect">
+      <assemblyIdentity name="Microsoft-Windows-CoreEdition" version="10.0.26100.1742" processorArchitecture="amd64" language="neutral" buildType="release" publicKeyToken="31bf3856ad364e35" />
+      <assemblyIdentity name="Microsoft-Windows-ProfessionalEdition" version="10.0.26100.1742" processorArchitecture="amd64" language="neutral" buildType="release" publicKeyToken="31bf3856ad364e35" />
+    </parent>
+    <update name="5129195-1_neutral_PACKAGE">
+      <package integrate="hidden">
+        <assemblyIdentity name="Package_1_for_KB5129195" version="26100.9457.1.0" processorArchitecture="amd64" language="neutral" publicKeyToken="31bf3856ad364e35" />
+      </package>
+    </update>
+    <update name="5129195-2_neutral_PACKAGE">
+      <package integrate="hidden">
+        <assemblyIdentity name="Package_2_for_KB5129195" version="26100.9457.1.0" processorArchitecture="amd64" language="neutral" publicKeyToken="31bf3856ad364e35" />
+      </package>
+    </update>
+  </package>
+</assembly>
