@@ -32,7 +32,8 @@ Exit code：0 成功、1 完成但有警告、2 失敗。
 
 - 本機比對以 `WinSxS\Manifests` 判斷元件是否在存放區，存放區同時包含已安裝與暫存的元件
 - 檔案沒有個別版本欄位，「新版本」以所屬元件版本表示
-- 尚未以真實 `.msu` 樣本完整測試（見 `docs/samples.md`）；WIM 格式（Windows 11 24H2 起）的套件可能需要以系統管理員身分執行——WIM 解壓縮只在以系統管理員權限執行測試時才會被涵蓋，非系統管理員權限下執行測試會略過該部分
+- **Windows 11 24H2 起的累積更新需要以系統管理員身分分析**：外層 WIM 無壓縮、可直接讀取，但內含以 LZMS / XPRESS 壓縮的 WIM，只能透過 wimgapi 展開，而 wimgapi 需要還原權限。程式會提示「以系統管理員重新啟動」
+- 已以真實樣本驗證（2026-09）：Windows 11 24H2 LCU（系統管理員）、Windows 10 22H2 LCU、Server 2022 LCU、.NET Framework 4.8.1 CU、Server 2019 SSU（見 `docs/samples.md`）
 
 ## 授權
 
@@ -74,7 +75,8 @@ Requires Rust (stable) on Windows 10 or later:
 
 - Local comparison uses `WinSxS\Manifests` to decide whether a component is in the store; the store holds both installed and staged components
 - Files have no individual version field; a file's new version is its component's version
-- Real `.msu` samples have not been fully tested yet (see `docs/samples.md`); WIM-format packages (Windows 11 24H2 and later) may require running as administrator — WIM extraction is only exercised when tests are run with elevated privileges, and a non-elevated test run skips that part
+- **Windows 11 24H2 and later cumulative updates must be analyzed as administrator**: the outer WIM is uncompressed and read directly, but it contains LZMS / XPRESS-compressed WIMs that only wimgapi can unpack, and wimgapi requires restore privilege. The app offers "Restart as administrator"
+- Verified with real packages (2026-09): Windows 11 24H2 LCU (as administrator), Windows 10 22H2 LCU, Server 2022 LCU, .NET Framework 4.8.1 CU, Server 2019 SSU (see `docs/samples.md`)
 
 ## License
 
