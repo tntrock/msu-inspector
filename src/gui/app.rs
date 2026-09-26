@@ -51,6 +51,8 @@ pub struct App {
     results: Option<Results>,
     export: Option<ExportDialog>,
     error: Option<String>,
+    /// 系統管理員模式的 WM_DROPFILES 拖放是否已安裝
+    elevated_drop_ready: bool,
 }
 
 impl App {
@@ -65,6 +67,7 @@ impl App {
             results: None,
             export: None,
             error: None,
+            elevated_drop_ready: false,
         }
     }
 
@@ -243,6 +246,12 @@ impl eframe::App for App {
             if let Some(f) = self.pending.take() {
                 self.start(f, &ctx);
             }
+        }
+        if self.elevated && !self.elevated_drop_ready {
+            self.elevated_drop_ready = super::elevated_drop::install(&ctx);
+        }
+        if let Some(p) = super::elevated_drop::take().into_iter().next() {
+            self.open(p, &ctx);
         }
         if let Some(p) = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()))
         {

@@ -1,6 +1,7 @@
 //! 圖形介面（egui / eframe）。
 
 mod app;
+mod elevated_drop;
 pub mod export_dialog;
 pub mod results;
 mod startup;
@@ -16,7 +17,8 @@ pub fn run(file: Option<PathBuf>) -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 760.0])
             .with_min_inner_size([860.0, 520.0])
-            .with_drag_and_drop(true),
+            // 提升權限時 OLE 拖放會被 UIPI 擋下，改由 elevated_drop 以 WM_DROPFILES 接收
+            .with_drag_and_drop(!crate::elevation::is_elevated()),
         ..Default::default()
     };
     eframe::run_native(
