@@ -209,11 +209,16 @@ fn local_state(action: &Action) -> Option<LocalState> {
 }
 
 pub fn evaluate(comp: &Component, action: &Action) -> Vec<&'static str> {
-    if comp
+    // 存放區有同版本元件不代表已安裝（可能只是暫存）；動作本身在本機也沒有變動，才算不會改變系統
+    let in_store_same = comp
         .local
         .as_ref()
-        .is_some_and(|l| l.state == LocalState::InStoreSame)
-    {
+        .is_some_and(|l| l.state == LocalState::InStoreSame);
+    let action_unchanged = matches!(
+        local_state(action),
+        None | Some(LocalState::Same) | Some(LocalState::Present)
+    );
+    if in_store_same && action_unchanged {
         return vec!["UNCHANGED_COMPONENT"];
     }
     let mut out = Vec::new();

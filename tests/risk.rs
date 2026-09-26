@@ -198,3 +198,48 @@ fn apply_sets_levels_and_unchanged_components_become_info() {
         (Risk::Info, vec!["UNCHANGED_COMPONENT"])
     );
 }
+
+#[test]
+fn in_store_component_with_changed_action_is_not_unchanged() {
+    let pe = ActionDetail::File(FileAction {
+        name: "k.dll".into(),
+        destination: "$(runtime.system32)\\".into(),
+        is_pe: true,
+        ..Default::default()
+    });
+    let mut report = AnalysisReport {
+        components: vec![comp(vec![pe.clone(), pe.clone(), pe])],
+        ..Default::default()
+    };
+    report.components[0].local = Some(LocalStatus {
+        state: LocalState::InStoreSame,
+        current: Some("10.0.26100.1".into()),
+        incoming: Some("10.0.26100.1".into()),
+    });
+    let set = |s| {
+        Some(LocalStatus {
+            state: s,
+            current: None,
+            incoming: None,
+        })
+    };
+    report.components[0].actions[0].local = set(LocalState::New);
+    report.components[0].actions[1].local = set(LocalState::Replace);
+    report.components[0].actions[2].local = set(LocalState::Same);
+    apply(&mut report);
+    let a = &report.components[0].actions;
+    // 檔案不在磁碟上（元件只是暫存於存放區）→ 仍會改變系統，照一般規則評估
+    assert_eq!(
+        (a[0].risk, a[0].rules.clone()),
+        (Risk::Medium, vec!["PE_SYSTEM"])
+    );
+    assert_eq!(
+        (a[1].risk, a[1].rules.clone()),
+        (Risk::Medium, vec!["PE_SYSTEM"])
+    );
+    // 本機已相同 → 才是「不會改變系統」
+    assert_eq!(
+        (a[2].risk, a[2].rules.clone()),
+        (Risk::Info, vec!["UNCHANGED_COMPONENT"])
+    );
+}
