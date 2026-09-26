@@ -147,6 +147,10 @@ pub fn extract(
     cancel: &AtomicBool,
     want: &dyn Fn(Role) -> bool,
 ) -> Result<Extracted, CoreError> {
+    // 無壓縮 WIM（24H2 的 .msu）直接解析：wimgapi 展開需要系統管理員的還原權限
+    if super::wimread::is_uncompressed(wim) {
+        return super::wimread::extract(wim, vprefix, out_dir, cancel, want);
+    }
     let tmp = out_dir.join("_wimtmp");
     std::fs::create_dir_all(&tmp).map_err(|e| CoreError::io(&tmp, e))?;
     let mut ctx = CallbackCtx {

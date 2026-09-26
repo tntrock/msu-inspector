@@ -8,6 +8,8 @@ use std::process::Command;
 
 use msu_inspector::core::delta::DeltaEngine;
 
+pub mod wimbuild;
+
 pub fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!(
         "{}/tests/fixtures/{name}",

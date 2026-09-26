@@ -3,6 +3,7 @@
 pub mod cab;
 pub mod psf;
 pub mod wim;
+pub mod wimread;
 
 use std::borrow::Cow;
 use std::collections::{HashSet, VecDeque};

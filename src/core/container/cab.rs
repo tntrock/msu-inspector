@@ -295,7 +295,7 @@ unsafe extern "system" fn fdi_seek(hf: isize, dist: i32, seektype: i32) -> i32 {
 }
 
 /// 檔名只保留安全字元，避免 CAB 內的奇怪名稱影響暫存路徑。
-fn sanitize(name: &str) -> String {
+pub(super) fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| {
             if c.is_alphanumeric() || ".-_".contains(c) {
