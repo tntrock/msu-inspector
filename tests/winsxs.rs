@@ -6,7 +6,7 @@ use msu_inspector::core::model::ActionKind;
 use msu_inspector::core::sys;
 
 fn run(limit: usize) {
-    let engine = DeltaEngine::system("msdelta.dll").unwrap();
+    let engine = DeltaEngine::msdelta().unwrap();
     let dcm = DcmDecoder::from_system().unwrap();
     let dir = sys::windows_dir().join("WinSxS").join("Manifests");
     let (mut parsed, mut failed, mut actions, mut unknown) = (0usize, Vec::new(), 0usize, 0usize);

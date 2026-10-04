@@ -18,7 +18,7 @@ use windows::Win32::Storage::Cabinets::{
 };
 use windows::Win32::System::Memory::{GetProcessHeap, HeapAlloc, HeapFree, HEAP_FLAGS};
 
-use super::{role_at, Extracted, Item, ItemData, Role};
+use super::{role_at, Item, ItemData, Role};
 use crate::core::CoreError;
 
 /// 留在記憶體的單一項目上限（位元組）；超過即以 Container 錯誤中止該 CAB。
@@ -87,8 +87,7 @@ struct Ctx<'a> {
     vprefix: &'a str,
     out_dir: &'a Path,
     cancel: &'a AtomicBool,
-    want: &'a dyn Fn(Role) -> bool,
-    out: Extracted,
+    out: Vec<Item>,
     counter: usize,
     error: Option<String>,
 }
@@ -98,8 +97,7 @@ pub fn extract(
     vprefix: &str,
     out_dir: &Path,
     cancel: &AtomicBool,
-    want: &dyn Fn(Role) -> bool,
-) -> Result<Extracted, CoreError> {
+) -> Result<Vec<Item>, CoreError> {
     let container_err = |detail: String| CoreError::Container {
         path: vprefix.to_string(),
         detail,
@@ -127,8 +125,7 @@ pub fn extract(
         vprefix,
         out_dir,
         cancel,
-        want,
-        out: Extracted::default(),
+        out: Vec::new(),
         counter: 0,
         error: None,
     };
@@ -331,10 +328,6 @@ unsafe extern "system" fn fdi_notify(
             if role == Role::Ignore {
                 return 0;
             }
-            if !(ctx.want)(role) {
-                ctx.out.skipped.push((vpath, role));
-                return 0;
-            }
             let size = n.cb.max(0) as u64;
             if !role.to_disk() && size > MAX_MEMORY_ITEM {
                 ctx.error = Some(format!(
@@ -371,11 +364,11 @@ unsafe extern "system" fn fdi_notify(
             };
             match *h {
                 Handle::Memory { vpath, buf } => {
-                    ctx.out.items.push(Item::new(vpath, ItemData::Bytes(buf)))
+                    ctx.out.push(Item::new(vpath, ItemData::Bytes(buf)))
                 }
                 Handle::Disk { vpath, path, file } => {
                     drop(file);
-                    ctx.out.items.push(Item::new(vpath, ItemData::File(path)));
+                    ctx.out.push(Item::new(vpath, ItemData::File(path)));
                 }
                 Handle::Read(_) => {}
             }

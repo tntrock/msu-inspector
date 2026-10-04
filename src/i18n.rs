@@ -372,9 +372,6 @@ mod tests {
         for k in ActionKind::ALL {
             assert!(!kind_name(k, Lang::ZhTw).is_empty() && !kind_name(k, Lang::En).is_empty());
         }
-        for s in LocalState::ALL {
-            assert_ne!(local_name(s, Lang::ZhTw), local_name(s, Lang::En));
-        }
         assert!(error_text(&CoreError::NoPackageFound, Lang::ZhTw).starts_with("檔案中找不到"));
     }
 }

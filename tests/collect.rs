@@ -1,9 +1,8 @@
 mod common;
 
-use msu_inspector::core::container::{collect, resolve_psfs};
-use msu_inspector::core::delta::DeltaEngine;
+use msu_inspector::core::container::collect;
 use msu_inspector::core::model::{ContainerFormat, WarningCode};
-use msu_inspector::core::progress::{Ctx, Progress};
+use msu_inspector::core::progress::Ctx;
 use msu_inspector::core::CoreError;
 
 const PKG_PROPS: &str =
@@ -74,7 +73,7 @@ fn collects_nested_msu_layout() {
 }
 
 #[test]
-fn desktop_deployment_only_provides_update_compression() {
+fn desktop_deployment_tooling_is_skipped() {
     let t = tempfile::tempdir().unwrap();
     let d = t.path();
     let dd = common::make_cab(
@@ -98,8 +97,12 @@ fn desktop_deployment_only_provides_update_compression() {
     );
     let c = collect(&msu, &d.join("work"), &Ctx::silent()).unwrap();
     assert_eq!(names(&c.manifests), vec!["a.manifest"]);
-    let dll = c.package_dll.expect("UpdateCompression.dll path");
-    assert_eq!(std::fs::read(dll).unwrap(), b"MZ-fake");
+    let dd = c
+        .containers
+        .iter()
+        .find(|i| i.path.ends_with("DesktopDeployment.cab"))
+        .unwrap();
+    assert_eq!(dd.skipped.as_deref(), Some("installer tooling"));
 }
 
 #[test]
@@ -174,84 +177,6 @@ fn cancel_stops_collection() {
 }
 
 #[test]
-fn resolves_manifests_from_psf_with_sidecar_index() {
-    let t = tempfile::tempdir().unwrap();
-    let d = t.path();
-    let (psf, xml) = common::build_psf(
-        d,
-        "Windows10.0-KB5099999-x64.psf",
-        &[
-            (
-                "amd64_x_10.0.1.1_none_abc\\a.manifest",
-                b"<assembly id=\"a\"/>",
-                true,
-            ),
-            ("amd64_x_10.0.1.1_none_abc\\f\\x.dll", b"MZ", false),
-        ],
-        false,
-    );
-    let inner = common::make_cab(
-        d,
-        "Windows10.0-KB5099999-x64.cab",
-        &[
-            ("update.mum", b"<assembly/>"),
-            ("express.psf.cix.xml", xml.as_bytes()),
-        ],
-        false,
-    );
-    let msu = common::make_cab(
-        d,
-        "x.msu",
-        &[
-            (
-                "Windows10.0-KB5099999-x64.cab",
-                &std::fs::read(&inner).unwrap(),
-            ),
-            (
-                "Windows10.0-KB5099999-x64.psf",
-                &std::fs::read(&psf).unwrap(),
-            ),
-        ],
-        false,
-    );
-    let mut c = collect(&msu, &d.join("work"), &Ctx::silent()).unwrap();
-    assert!(c.saw_psf);
-    assert_eq!(
-        c.psfs.len(),
-        1,
-        "second pass extracts the PSF because no manifest was found"
-    );
-    resolve_psfs(&mut c, &DeltaEngine::select(None).unwrap(), &Ctx::silent()).unwrap();
-    assert_eq!(names(&c.manifests), vec!["a.manifest"]);
-    assert_eq!(&*c.manifests[0].bytes().unwrap(), b"<assembly id=\"a\"/>");
-    assert!(c
-        .containers
-        .iter()
-        .any(|i| i.format == ContainerFormat::Psf));
-}
-
-#[test]
-fn skips_psf_when_manifests_already_found() {
-    let t = tempfile::tempdir().unwrap();
-    let d = t.path();
-    let (psf, _) = common::build_psf(d, "kb.psf", &[("a.manifest", b"<assembly/>", false)], true);
-    let inner = common::make_cab(d, "kb.cab", &[("b.manifest", b"<assembly/>")], false);
-    let msu = common::make_cab(
-        d,
-        "x.msu",
-        &[
-            ("kb.cab", &std::fs::read(&inner).unwrap()),
-            ("kb.psf", &std::fs::read(&psf).unwrap()),
-        ],
-        false,
-    );
-    let c = collect(&msu, &d.join("work"), &Ctx::silent()).unwrap();
-    assert!(c.saw_psf);
-    assert!(c.psfs.is_empty());
-    assert_eq!(names(&c.manifests), vec!["b.manifest"]);
-}
-
-#[test]
 fn keeps_update_mum_from_every_container() {
     let t = tempfile::tempdir().unwrap();
     let d = t.path();
@@ -292,92 +217,6 @@ fn keeps_update_mum_from_every_container() {
             "Windows11.0-KB5099999-x64.msu/Windows11.0-KB5099999-x64.cab/update.mum",
         ]
     );
-}
-
-#[test]
-fn cancel_stops_psf_entry_loop() {
-    let t = tempfile::tempdir().unwrap();
-    let d = t.path();
-    let (psf, _) = common::build_psf(
-        d,
-        "kb.psf",
-        &[(r"amd64_x\a.manifest", b"<assembly/>", false)],
-        true,
-    );
-    let msu = common::make_cab(
-        d,
-        "x.msu",
-        &[("kb.psf", &std::fs::read(&psf).unwrap())],
-        false,
-    );
-    let mut c = collect(&msu, &d.join("work"), &Ctx::silent()).unwrap();
-    assert_eq!(c.psfs.len(), 1);
-    // 在 PSF 開始展開時按下取消：項目迴圈必須停下，而不是讀完所有項目
-    let r = resolve_psfs(
-        &mut c,
-        &DeltaEngine::select(None).unwrap(),
-        &cancel_on(|p| matches!(p, Progress::Unpacking { .. })),
-    );
-    assert!(matches!(r, Err(CoreError::Cancelled)), "{r:?}");
-}
-
-/// 收到符合條件的進度回報時，由回呼本身按下取消。
-fn cancel_on(when: impl Fn(&Progress) -> bool + Send + Sync + 'static) -> Ctx {
-    use std::sync::{Arc, OnceLock};
-    let flag: Arc<OnceLock<Arc<std::sync::atomic::AtomicBool>>> = Arc::default();
-    let f = flag.clone();
-    let ctx = Ctx::new(move |p| {
-        if when(&p) {
-            if let Some(c) = f.get() {
-                c.store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-        }
-    });
-    let _ = flag.set(ctx.cancel_flag());
-    ctx
-}
-
-#[test]
-fn second_pass_removes_first_pass_and_keeps_package_dll() {
-    let t = tempfile::tempdir().unwrap();
-    let d = t.path();
-    let dd = common::make_cab(
-        d,
-        "DesktopDeployment.cab",
-        &[("UpdateCompression.dll", b"MZ-fake")],
-        false,
-    );
-    let (psf, xml) = common::build_psf(
-        d,
-        "kb.psf",
-        &[(r"amd64_x\a.manifest", b"<assembly/>", false)],
-        false,
-    );
-    let inner = common::make_cab(
-        d,
-        "kb.cab",
-        &[
-            ("update.mum", b"<assembly/>"),
-            ("express.psf.cix.xml", xml.as_bytes()),
-        ],
-        false,
-    );
-    let msu = common::make_cab(
-        d,
-        "x.msu",
-        &[
-            ("DesktopDeployment.cab", &std::fs::read(&dd).unwrap()),
-            ("kb.cab", &std::fs::read(&inner).unwrap()),
-            ("kb.psf", &std::fs::read(&psf).unwrap()),
-        ],
-        false,
-    );
-    let work = d.join("work");
-    let c = collect(&msu, &work, &Ctx::silent()).unwrap();
-    assert_eq!(c.psfs.len(), 1, "second pass must run");
-    assert!(!work.join("pass1").exists(), "pass1 must be removed");
-    let dll = c.package_dll.expect("UpdateCompression.dll path");
-    assert_eq!(std::fs::read(dll).unwrap(), b"MZ-fake");
 }
 
 #[test]

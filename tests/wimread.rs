@@ -5,7 +5,7 @@ mod common;
 use std::sync::atomic::AtomicBool;
 
 use common::wimbuild::{build_wim, WimEntry};
-use msu_inspector::core::container::{wim, ItemData, Role};
+use msu_inspector::core::container::{wim, ItemData};
 use msu_inspector::core::CoreError;
 
 const COMP: &str =
@@ -43,9 +43,8 @@ fn reads_uncompressed_wim_without_elevation() {
     );
     let out = t.path().join("out");
     std::fs::create_dir_all(&out).unwrap();
-    let want = |r: Role| r != Role::Psf;
-    let ex = wim::extract(&w, "x.msu", &out, &AtomicBool::new(false), &want).unwrap();
-    let mut names: Vec<&str> = ex.items.iter().map(|i| i.name.as_str()).collect();
+    let ex = wim::extract(&w, "x.msu", &out, &AtomicBool::new(false)).unwrap();
+    let mut names: Vec<&str> = ex.iter().map(|i| i.name.as_str()).collect();
     names.sort();
     assert_eq!(
         names,
@@ -56,26 +55,22 @@ fn reads_uncompressed_wim_without_elevation() {
             "update.mum"
         ]
     );
-    let b = ex.items.iter().find(|i| i.name == "b.manifest").unwrap();
+    let b = ex.iter().find(|i| i.name == "b.manifest").unwrap();
     assert_eq!(b.vpath, "x.msu/Manifests/b.manifest");
     assert_eq!(&*b.bytes().unwrap(), b"<assembly id=\"b\"/>");
-    let cab = ex.items.iter().find(|i| i.name.ends_with(".cab")).unwrap();
+    let cab = ex.iter().find(|i| i.name.ends_with(".cab")).unwrap();
     let ItemData::File(p) = &cab.data else {
         panic!("nested cab must go to disk")
     };
     assert_eq!(std::fs::read(p).unwrap(), b"MSCF-fake");
     assert!(p.starts_with(&out));
-    assert_eq!(
-        ex.skipped,
-        vec![("x.msu/Windows11.0-KB1-x64.psf".to_string(), Role::Psf)]
-    );
 }
 
 #[test]
 fn cancel_stops_reading() {
     let t = tempfile::tempdir().unwrap();
     let w = build_wim(t.path(), "x.msu", &[entry("a.manifest", b"<a/>")]);
-    let r = wim::extract(&w, "x.msu", t.path(), &AtomicBool::new(true), &|_| true);
+    let r = wim::extract(&w, "x.msu", t.path(), &AtomicBool::new(true));
     assert!(matches!(r, Err(CoreError::Cancelled)), "{r:?}");
 }
 
@@ -85,7 +80,7 @@ fn rejects_truncated_uncompressed_wim() {
     let w = build_wim(t.path(), "x.msu", &[entry("a.manifest", b"<a/>")]);
     let good = std::fs::read(&w).unwrap();
     std::fs::write(&w, &good[..good.len() - 10]).unwrap(); // lookup table 超出檔尾
-    let r = wim::extract(&w, "x.msu", t.path(), &AtomicBool::new(false), &|_| true);
+    let r = wim::extract(&w, "x.msu", t.path(), &AtomicBool::new(false));
     assert!(matches!(r, Err(CoreError::Container { .. })), "{r:?}");
 }
 
@@ -105,7 +100,7 @@ fn survives_self_referencing_directory() {
     bad[first + 8..first + 12].copy_from_slice(&0x10u32.to_le_bytes());
     bad[first + 16..first + 24].copy_from_slice(&block.to_le_bytes());
     std::fs::write(&w, &bad).unwrap();
-    let r = wim::extract(&w, "x.msu", t.path(), &AtomicBool::new(false), &|_| true);
+    let r = wim::extract(&w, "x.msu", t.path(), &AtomicBool::new(false));
     assert!(
         r.is_ok() || matches!(r, Err(CoreError::Container { .. })),
         "{r:?}"

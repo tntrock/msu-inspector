@@ -2,11 +2,8 @@
 #![allow(dead_code)]
 
 use std::fmt::Write as _;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-use msu_inspector::core::delta::DeltaEngine;
 
 pub mod wimbuild;
 
@@ -72,47 +69,83 @@ pub fn utf16(text: &str) -> Vec<u8> {
     out
 }
 
-/// 產生 PSF：payload 從 0x10000 開始；`pa30` 為 true 的項目以 PA30 null-source 儲存。
-/// `embed` 為 true 時索引放在檔頭（24H2 格式），否則回傳的 XML 需另存為 `*.psf.cix.xml`。
-pub fn build_psf(
-    dir: &Path,
-    file_name: &str,
-    entries: &[(&str, &[u8], bool)],
-    embed: bool,
-) -> (PathBuf, String) {
-    let e = DeltaEngine::system("msdelta.dll").unwrap();
-    let mut payload = Vec::new();
-    let mut files = String::new();
-    for (i, (name, data, pa30)) in entries.iter().enumerate() {
-        let stored = if *pa30 {
-            e.create(b"", data).unwrap()
+/// 以 msdelta.dll 的 CreateDeltaB 產生 PA30 差異（只給測試建立 fixture 用）。
+pub fn create_delta(source: &[u8], target: &[u8]) -> Vec<u8> {
+    use std::ffi::c_void;
+    use windows::core::{s, HSTRING};
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::LibraryLoader::{
+        GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32,
+    };
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Input {
+        start: *const c_void,
+        size: usize,
+        editable: i32,
+    }
+    #[repr(C)]
+    struct Output {
+        start: *mut c_void,
+        size: usize,
+    }
+    type CreateFn = unsafe extern "system" fn(
+        i64,
+        i64,
+        i64,
+        Input,
+        Input,
+        Input,
+        Input,
+        Input,
+        *const FILETIME,
+        u32,
+        *mut Output,
+    ) -> i32;
+    type FreeFn = unsafe extern "system" fn(*mut c_void) -> i32;
+    let input = |b: &[u8]| Input {
+        start: if b.is_empty() {
+            std::ptr::null()
         } else {
-            data.to_vec()
-        };
-        let offset = 0x10000 + payload.len();
-        writeln!(
-            files,
-            "<File id=\"{i}\" name=\"{name}\" length=\"{}\" time=\"0\" attr=\"128\"><Delta><Source type=\"{}\" offset=\"{offset}\" length=\"{}\"/></Delta></File>",
-            data.len(),
-            if *pa30 { "PA30" } else { "RAW" },
-            stored.len()
+            b.as_ptr().cast()
+        },
+        size: b.len(),
+        editable: 0,
+    };
+    // SAFETY: 依 msdelta.h 的原型呼叫；輸入在呼叫期間有效，輸出以 DeltaFree 釋放。
+    unsafe {
+        let m = LoadLibraryExW(
+            &HSTRING::from("msdelta.dll"),
+            None,
+            LOAD_LIBRARY_SEARCH_SYSTEM32,
         )
         .unwrap();
-        payload.extend(stored);
+        let create: CreateFn = std::mem::transmute(GetProcAddress(m, s!("CreateDeltaB")).unwrap());
+        let free: FreeFn = std::mem::transmute(GetProcAddress(m, s!("DeltaFree")).unwrap());
+        let empty = input(&[]);
+        let mut out = Output {
+            start: std::ptr::null_mut(),
+            size: 0,
+        };
+        let ok = create(
+            1, // DELTA_FILE_TYPE_RAW
+            0,
+            0,
+            input(source),
+            input(target),
+            empty,
+            empty,
+            empty,
+            &FILETIME::default(),
+            0x8003, // CALG_MD5
+            &mut out,
+        );
+        assert!(ok != 0, "CreateDeltaB failed");
+        if out.start.is_null() {
+            return Vec::new();
+        }
+        let v = std::slice::from_raw_parts(out.start as *const u8, out.size).to_vec();
+        free(out.start);
+        v
     }
-    let xml = format!("<?xml version=\"1.0\"?><Container type=\"PSF\" version=\"2.0\"><Files>{files}</Files></Container>");
-    let mut buf = vec![0u8; 0x10000];
-    buf[..4].copy_from_slice(b"PSTR");
-    if embed {
-        let idx = e.create(b"", xml.as_bytes()).unwrap();
-        buf[4..8].copy_from_slice(&(idx.len() as u32).to_le_bytes());
-        buf[0x80..0x80 + idx.len()].copy_from_slice(&idx);
-    }
-    buf.extend(payload);
-    let path = dir.join(file_name);
-    std::fs::File::create(&path)
-        .unwrap()
-        .write_all(&buf)
-        .unwrap();
-    (path, xml)
 }
