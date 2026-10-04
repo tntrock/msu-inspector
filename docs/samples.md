@@ -4,7 +4,7 @@
 
 | 類型 | Catalog 搜尋字串 | 驗證重點 |
 |------|------------------|----------|
-| 24H2 LCU（`.msu` 為 WIM） | `Cumulative Update for Windows 11 Version 24H2 for x64` | WIM 外層、PSF、UpdateCompression |
+| 24H2 LCU（`.msu` 為 WIM） | `Cumulative Update for Windows 11 Version 24H2 for x64` | WIM 外層與內層 WIM（需系統管理員） |
 | 23H2 LCU | `Cumulative Update for Windows 11 Version 23H2 for x64` | CAB 內含 CAB、PSFX |
 | Windows 10 22H2 LCU | `Cumulative Update for Windows 10 Version 22H2 for x64` | 傳統格式 |
 | Server 2022 LCU | `Cumulative Update for Microsoft server operating system version 21H2 for x64` | Server 版本 |

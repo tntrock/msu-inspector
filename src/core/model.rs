@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// manifest / .mum 的 `assemblyIdentity`。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
@@ -38,18 +38,9 @@ pub enum Risk {
 impl Risk {
     /// 由高到低，GUI 與摘要依此順序列出。
     pub const ALL: [Risk; 4] = [Risk::High, Risk::Medium, Risk::Low, Risk::Info];
-
-    pub fn code(self) -> &'static str {
-        match self {
-            Risk::Info => "info",
-            Risk::Low => "low",
-            Risk::Medium => "medium",
-            Risk::High => "high",
-        }
-    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionKind {
     File,
@@ -83,32 +74,6 @@ impl ActionKind {
         ActionKind::Setting,
         ActionKind::Unknown,
     ];
-
-    /// JSON 與 `--kinds` 使用的代碼。
-    pub fn code(self) -> &'static str {
-        match self {
-            ActionKind::File => "file",
-            ActionKind::Registry => "registry",
-            ActionKind::Directory => "directory",
-            ActionKind::Service => "service",
-            ActionKind::Driver => "driver",
-            ActionKind::ScheduledTask => "scheduled_task",
-            ActionKind::GenericCommand => "generic_command",
-            ActionKind::FirewallRule => "firewall_rule",
-            ActionKind::WmiMof => "wmi_mof",
-            ActionKind::EtwEventlog => "etw_eventlog",
-            ActionKind::AdvancedInstaller => "advanced_installer",
-            ActionKind::Setting => "setting",
-            ActionKind::Unknown => "unknown",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<ActionKind> {
-        let s = s.trim();
-        ActionKind::ALL
-            .into_iter()
-            .find(|k| k.code().eq_ignore_ascii_case(s))
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -351,36 +316,6 @@ pub enum LocalState {
     NotInStore,
 }
 
-impl LocalState {
-    pub const ALL: [LocalState; 10] = [
-        LocalState::New,
-        LocalState::Replace,
-        LocalState::Same,
-        LocalState::Downgrade,
-        LocalState::Present,
-        LocalState::UnknownPath,
-        LocalState::InStoreSame,
-        LocalState::InStoreOlder,
-        LocalState::InStoreNewer,
-        LocalState::NotInStore,
-    ];
-
-    pub fn code(self) -> &'static str {
-        match self {
-            LocalState::New => "new",
-            LocalState::Replace => "replace",
-            LocalState::Same => "same",
-            LocalState::Downgrade => "downgrade",
-            LocalState::Present => "present",
-            LocalState::UnknownPath => "unknown_path",
-            LocalState::InStoreSame => "in_store_same",
-            LocalState::InStoreOlder => "in_store_older",
-            LocalState::InStoreNewer => "in_store_newer",
-            LocalState::NotInStore => "not_in_store",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LocalStatus {
     #[serde(rename = "status")]
@@ -456,17 +391,6 @@ pub enum SignatureStatus {
     Unknown,
 }
 
-impl SignatureStatus {
-    pub fn code(self) -> &'static str {
-        match self {
-            SignatureStatus::Valid => "valid",
-            SignatureStatus::Unsigned => "unsigned",
-            SignatureStatus::Invalid => "invalid",
-            SignatureStatus::Unknown => "unknown",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SignatureInfo {
     pub status: SignatureStatus,
@@ -479,7 +403,6 @@ pub struct SignatureInfo {
 pub enum ContainerFormat {
     Cab,
     Wim,
-    Psf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -496,12 +419,10 @@ pub struct SourceInfo {
     pub file: String,
     pub size: u64,
     pub sha256: String,
-    /// `msu-cab` / `msu-wim` / `cab`，含 PSF 時加上 `+psf`
+    /// `msu-cab` / `msu-wim` / `cab` / `wim`
     pub format: String,
     pub signature: SignatureInfo,
     pub containers: Vec<ContainerInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delta_engine: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -540,7 +461,6 @@ pub enum WarningCode {
     ManifestParseFailed,
     MumParseFailed,
     ContainerFailed,
-    PsfFailed,
     SignatureNotValid,
     LocalCompareFailed,
     TempCleanupFailed,
@@ -628,12 +548,16 @@ mod tests {
     }
 
     #[test]
-    fn kind_codes_round_trip() {
+    fn kind_names_round_trip_through_serde() {
         for k in ActionKind::ALL {
-            assert_eq!(ActionKind::parse(k.code()), Some(k));
-            assert_eq!(serde_json::to_value(k).unwrap(), json!(k.code()));
+            let v = serde_json::to_value(k).unwrap();
+            assert_eq!(serde_json::from_value::<ActionKind>(v).unwrap(), k);
         }
-        assert_eq!(ActionKind::parse("nope"), None);
+        assert_eq!(
+            serde_json::to_value(ActionKind::ScheduledTask).unwrap(),
+            json!("scheduled_task")
+        );
+        assert!(serde_json::from_value::<ActionKind>(json!("nope")).is_err());
     }
 
     #[test]

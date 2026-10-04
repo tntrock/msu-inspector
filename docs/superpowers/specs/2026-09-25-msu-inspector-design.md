@@ -60,8 +60,7 @@
 |------|------|
 | CAB | `cabinet.dll`（FDI API）：單次循序解壓，於 `fdintCOPY_FILE` 只挑需要的檔案（manifest、`.mum`、巢狀容器等）。純 Rust 的 `cab` crate 讀取 LZX 固實資料夾中的每個檔案都要從頭解壓，數萬個 manifest 時為平方時間，故不採用 |
 | WIM | `wimgapi.dll`（以不套用 ACL 的方式展開到暫存資料夾） |
-| PSF | 自行解析索引（獨立的 `*.psf.cix.xml`，或 PSF 檔頭內嵌、以 PA30 壓縮的索引），依來源型別還原：RAW 直接讀、PA30 用差異引擎、PA19 用 `mspatcha.dll` |
-| 差異引擎（PA30） | 優先使用系統的 `UpdateCompression.dll`（24H2 起內建），其次為 `.msu` 內 `DesktopDeployment.cab` 附帶的 `UpdateCompression.dll`（**載入前驗證 Microsoft 簽章**），最後才用 `msdelta.dll` |
+| 差異引擎（PA30） | 系統 `msdelta.dll`（只用於 DCM manifest 解壓） |
 | DCM manifest | 差異引擎 + 本機 servicing stack `wcp.dll` 內嵌基底字典（資源型別 `0x266`、ID `1`；已在本機驗證可解開 WinSxS 內 19,173 個 manifest） |
 | 簽章驗證 | `WinVerifyTrust` |
 
@@ -103,8 +102,8 @@ src/
       detect.rs        格式偵測
       cab.rs           cabinet.dll FDI（可處理巢狀 CAB）
       wim.rs           wimgapi.dll
-      psf.rs           PSF 索引解析與還原
-    delta.rs         差異引擎（UpdateCompression / msdelta / mspatcha）
+      wimread.rs       無壓縮 WIM 直接解析（不需系統管理員）
+    delta.rs         msdelta 差異引擎與 DCM 解壓
     manifest/
       dcm.rs           DCM 解壓
       parse.rs         .mum / .manifest XML 解析為結構化資料
@@ -198,7 +197,7 @@ core 不依賴 GUI，可獨立測試。
   "source": {
     "file": "windows11.0-kb50xxxxx-x64.msu",
     "sha256": "...",
-    "format": "msu-psf",
+    "format": "msu-wim",
     "signature": { "valid": true, "signer": "Microsoft Corporation" }
   },
   "package": { "kb": "KB50xxxxx", "identity": {}, "applicability": [], "restart_required": true },
@@ -296,3 +295,8 @@ msu-inspector analyze <FILE> [--json <OUT>] [--detail summary|risk|full]
 - 累積更新的 `.mum` 為 PSFX 格式（`customInformation PackageFormat="PSFX"`），頂層套件以 `<update><package>` 參照數千個子套件，元件清單在子套件 `.mum` 的 `<update><component>` 中。
 - 24H2 起 `.msu` 本身為 WIM（檔頭 `MSWIM`）；內含的 `.psf` 在偏移 4 有 u32 索引長度，偏移 `0x80` 起為 PA30（空來源）壓縮的索引 XML（`<Container type="PSF"><Files><File name><Delta><Source type offset length>`）。
 - 詳細資料窗格的「原始 XML」只保留給 `unknown` 動作；其餘動作以結構化欄位呈現，避免大型 LCU 在記憶體中保留數百 MB 的 manifest 原文。
+
+## 12. 修訂（2026-10-04）
+
+- **移除 PSF 支援**：5 包真實更新（含 24H2 LCU）的 manifest 全部在 CAB / WIM 中找到，PSF 只存放要安裝的檔案本體，PSF 路徑從未被使用。一併移除 PA19（mspatcha）、套件附帶 `UpdateCompression.dll` 的載入與 Microsoft 根憑證檢查；`DesktopDeployment*.cab` 改為與 `WSUSSCAN.cab` 一樣略過。第 1、2、11 節中關於 PSF 的描述僅為歷史記錄。
+- 無壓縮 WIM 由 `wimread.rs` 直接解析；有壓縮的 WIM 仍需 wimgapi（系統管理員）。

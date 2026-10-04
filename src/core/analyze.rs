@@ -1,4 +1,4 @@
-//! 完整流程：雜湊 → 簽章 → 拆包 →（PSF）→ DCM 解壓與解析 → 套件資訊 →（本機比對）→ 風險。
+//! 完整流程：雜湊 → 簽章 → 拆包 → DCM 解壓與解析 → 套件資訊 →（本機比對）→ 風險。
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -25,18 +25,13 @@ pub struct AnalyzeOptions {
     pub temp_root: Option<PathBuf>,
 }
 
-pub fn format_label(outer: Option<ContainerFormat>, file_name: &str, has_psf: bool) -> String {
+pub fn format_label(outer: Option<ContainerFormat>, file_name: &str) -> &'static str {
     let msu = file_name.to_ascii_lowercase().ends_with(".msu");
-    let base = match (outer, msu) {
+    match (outer, msu) {
         (Some(ContainerFormat::Wim), true) => "msu-wim",
         (Some(ContainerFormat::Wim), false) => "wim",
         (_, true) => "msu-cab",
         _ => "cab",
-    };
-    if has_psf {
-        format!("{base}+psf")
-    } else {
-        base.to_string()
     }
 }
 
@@ -84,14 +79,6 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
     })?;
 
     let mut collected = container::collect(path, temp.path(), ctx)?;
-    let psf_engine = if collected.psfs.is_empty() {
-        None
-    } else {
-        // 套件附帶的 DLL 由 select 鎖住檔案、驗證簽章後才載入
-        let engine = DeltaEngine::select(collected.package_dll.as_deref())?;
-        container::resolve_psfs(&mut collected, &engine, ctx)?;
-        Some(engine.label().to_string())
-    };
     if collected.manifests.is_empty() && collected.mums.is_empty() {
         return Err(CoreError::NoPackageFound);
     }
@@ -101,7 +88,7 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
         warnings.push(Warning::new(
             WarningCode::SignatureNotValid,
             &file_name,
-            signature.status.code(),
+            format!("{:?}", signature.status).to_ascii_lowercase(),
         ));
     }
     let (components, parse_warnings) = decode_and_parse(&collected.manifests, ctx)?;
@@ -137,22 +124,17 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
         .unwrap_or_default();
     let kb_hint = kb_from_file_name(&file_name);
     let package = select_package(&mums, kb_hint.as_deref(), properties);
-    let has_psf = collected
-        .containers
-        .iter()
-        .any(|c| c.format == ContainerFormat::Psf && c.skipped.is_none());
 
     let mut report = AnalysisReport {
         mode: Mode::Static,
         local_context: None,
         source: SourceInfo {
-            format: format_label(collected.outer, &file_name, has_psf),
+            format: format_label(collected.outer, &file_name).to_string(),
             file: file_name,
             size: meta.len(),
             sha256,
             signature,
             containers: std::mem::take(&mut collected.containers),
-            delta_engine: psf_engine,
         },
         package,
         components,
@@ -211,10 +193,7 @@ fn decode_and_parse(
         .iter()
         .any(|i| matches!(&i.data, container::ItemData::Bytes(b) if is_dcm(b)));
     let dcm: Option<DcmTools> = if needs_dcm {
-        Some((
-            DeltaEngine::system("msdelta.dll")?,
-            DcmDecoder::from_system(),
-        ))
+        Some((DeltaEngine::msdelta()?, DcmDecoder::from_system()))
     } else {
         None
     };

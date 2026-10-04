@@ -4,7 +4,7 @@ Windows 更新套件（`.msu` / `.cab`）部署前審查工具：**不安裝**�
 
 ## 功能
 
-- 拖放 `.msu` / `.cab`，自動辨識傳統 CAB 格式與 24H2 起的 WIM + PSF 格式
+- 拖放 `.msu` / `.cab`，自動辨識傳統 CAB 格式與 24H2 起的 WIM 格式
 - 解開 WinSxS 的 DCM 壓縮 manifest（使用 Windows 內建的 msdelta 與 servicing stack 基底）
 - 風險規則（開機驅動、genericCommand、LSA / 自動啟動登錄、允許輸入的防火牆規則…），每筆標記都附理由
 - 系統管理員模式下與本機比對：檔案版本、元件存放區、登錄值、服務設定、排程工作
@@ -47,7 +47,7 @@ A pre-deployment review tool for Windows update packages (`.msu` / `.cab`). With
 
 ## Features
 
-- Drag and drop `.msu` / `.cab`; handles classic CAB packages and the WIM + PSF format used since Windows 11 24H2
+- Drag and drop `.msu` / `.cab`; handles classic CAB packages and the WIM format used since Windows 11 24H2
 - Decodes DCM-compressed WinSxS manifests with the built-in msdelta and the servicing-stack base manifest
 - Rule-based risk flags (boot drivers, genericCommand, LSA / autostart registry, inbound-allow firewall rules…), each with a reason
 - Local comparison when running as administrator: file versions, component store, registry values, service configuration, scheduled tasks

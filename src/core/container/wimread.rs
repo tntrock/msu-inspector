@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::cab::{sanitize, MAX_MEMORY_ITEM};
-use super::{role_at, Extracted, Item, ItemData, Role};
+use super::{role_at, Item, ItemData, Role};
 use crate::core::CoreError;
 
 const HEADER_SIZE: usize = 208;
@@ -80,9 +80,8 @@ struct Reader<'a> {
     vprefix: &'a str,
     out_dir: &'a Path,
     cancel: &'a AtomicBool,
-    want: &'a dyn Fn(Role) -> bool,
     lookup: HashMap<[u8; 20], Resource>,
-    out: Extracted,
+    out: Vec<Item>,
     counter: usize,
     dentries: usize,
 }
@@ -208,10 +207,6 @@ impl Reader<'_> {
         if role == Role::Ignore {
             return Ok(());
         }
-        if !(self.want)(role) {
-            self.out.skipped.push((vpath, role));
-            return Ok(());
-        }
         let res = if hash == [0; 20] {
             Resource {
                 offset: 0,
@@ -249,19 +244,18 @@ impl Reader<'_> {
             }
             ItemData::Bytes(self.read_resource(&res, MAX_MEMORY_ITEM)?)
         };
-        self.out.items.push(Item::new(vpath, data));
+        self.out.push(Item::new(vpath, data));
         Ok(())
     }
 }
 
-/// 讀取無壓縮 WIM 的所有 image，只取出 `want` 接受的項目（行為與 wimgapi 路徑相同）。
+/// 讀取無壓縮 WIM 的所有 image，取出 manifest、.mum 與巢狀容器（行為與 wimgapi 路徑相同）。
 pub fn extract(
     wim: &Path,
     vprefix: &str,
     out_dir: &Path,
     cancel: &AtomicBool,
-    want: &dyn Fn(Role) -> bool,
-) -> Result<Extracted, CoreError> {
+) -> Result<Vec<Item>, CoreError> {
     let mut file = File::open(wim).map_err(|e| CoreError::io(wim, e))?;
     let file_size = file.metadata().map_err(|e| CoreError::io(wim, e))?.len();
     let mut head = [0u8; HEADER_SIZE];
@@ -273,9 +267,8 @@ pub fn extract(
         vprefix,
         out_dir,
         cancel,
-        want,
         lookup: HashMap::new(),
-        out: Extracted::default(),
+        out: Vec::new(),
         counter: 0,
         dentries: 0,
     };

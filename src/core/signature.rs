@@ -6,10 +6,7 @@ use std::path::Path;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, HWND};
-use windows::Win32::Security::Cryptography::{
-    CertGetNameStringW, CertVerifyCertificateChainPolicy, CERT_CHAIN_POLICY_MICROSOFT_ROOT,
-    CERT_CHAIN_POLICY_PARA, CERT_CHAIN_POLICY_STATUS, CERT_NAME_SIMPLE_DISPLAY_TYPE,
-};
+use windows::Win32::Security::Cryptography::{CertGetNameStringW, CERT_NAME_SIMPLE_DISPLAY_TYPE};
 use windows::Win32::Security::WinTrust::*;
 
 use super::model::{SignatureInfo, SignatureStatus};
@@ -97,51 +94,4 @@ unsafe fn signer_name(state: HANDLE) -> Option<String> {
         );
         (n > 1).then(|| String::from_utf16_lossy(&buf[..n as usize - 1]))
     }
-}
-
-/// 簽章有效，且簽章者的憑證鏈通過 `CERT_CHAIN_POLICY_MICROSOFT_ROOT`（根憑證為 Microsoft 根）。
-pub fn chains_to_microsoft_root(path: &Path) -> bool {
-    with_trust(path, |code, state| {
-        if code != 0 {
-            return false;
-        }
-        // SAFETY: state 為 VERIFY 之後、CLOSE 之前的狀態代號；鏈結內容由 WinTrust 持有，
-        // 在 CLOSE 前有效，policy para / status 為本函式的區域變數。
-        unsafe {
-            let Some(sgnr) = primary_signer(state) else {
-                return false;
-            };
-            let chain = (*sgnr).pChainContext;
-            if chain.is_null() {
-                return false;
-            }
-            let para = CERT_CHAIN_POLICY_PARA {
-                cbSize: size_of::<CERT_CHAIN_POLICY_PARA>() as u32,
-                ..Default::default()
-            };
-            let mut status = CERT_CHAIN_POLICY_STATUS {
-                cbSize: size_of::<CERT_CHAIN_POLICY_STATUS>() as u32,
-                ..Default::default()
-            };
-            CertVerifyCertificateChainPolicy(
-                CERT_CHAIN_POLICY_MICROSOFT_ROOT,
-                chain,
-                &para,
-                &mut status,
-            )
-            .as_bool()
-                && status.dwError == 0
-        }
-    })
-}
-
-/// 可信任的 Microsoft 檔案：簽章有效、簽章者名稱含 `Microsoft`，且憑證鏈到 Microsoft 根。
-pub fn is_microsoft_signed(path: &Path) -> bool {
-    let info = verify(path);
-    info.status == SignatureStatus::Valid
-        && info
-            .signer
-            .as_deref()
-            .is_some_and(|s| s.contains("Microsoft"))
-        && chains_to_microsoft_root(path)
 }

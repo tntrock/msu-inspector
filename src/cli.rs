@@ -85,11 +85,12 @@ fn run_analyze(a: AnalyzeArgs, lang: Lang) -> i32 {
     };
     let mut kinds = BTreeSet::new();
     for k in &a.kinds {
-        match ActionKind::parse(k) {
-            Some(kind) => {
+        match serde_json::from_value::<ActionKind>(serde_json::json!(k.trim().to_ascii_lowercase()))
+        {
+            Ok(kind) => {
                 kinds.insert(kind);
             }
-            None => {
+            Err(_) => {
                 eprintln!("{}: {k}", t.cli_bad_kind);
                 return EXIT_FAILED;
             }

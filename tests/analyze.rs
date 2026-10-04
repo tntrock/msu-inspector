@@ -1,7 +1,7 @@
 mod common;
 
 use msu_inspector::core::analyze::{analyze, format_label, AnalyzeOptions};
-use msu_inspector::core::delta::{DcmDecoder, DeltaEngine};
+use msu_inspector::core::delta::DcmDecoder;
 use msu_inspector::core::model::*;
 use msu_inspector::core::progress::Ctx;
 use msu_inspector::core::CoreError;
@@ -10,12 +10,10 @@ use msu_inspector::core::CoreError;
 fn build_msu(dir: &std::path::Path) -> std::path::PathBuf {
     let dcm = DcmDecoder::from_system().unwrap();
     let mut basic_dcm = b"DCM\x01".to_vec();
-    basic_dcm.extend(
-        DeltaEngine::system("msdelta.dll")
-            .unwrap()
-            .create(dcm.base(), common::fixture("basic.manifest").as_bytes())
-            .unwrap(),
-    );
+    basic_dcm.extend(common::create_delta(
+        dcm.base(),
+        common::fixture("basic.manifest").as_bytes(),
+    ));
     let inner = common::make_cab(
         dir,
         "Windows11.0-KB5129195-x64.cab",
@@ -164,18 +162,9 @@ fn rejects_missing_and_non_update_files() {
 
 #[test]
 fn labels_formats() {
-    assert_eq!(
-        format_label(Some(ContainerFormat::Cab), "a.msu", false),
-        "msu-cab"
-    );
-    assert_eq!(
-        format_label(Some(ContainerFormat::Wim), "a.MSU", true),
-        "msu-wim+psf"
-    );
-    assert_eq!(
-        format_label(Some(ContainerFormat::Cab), "a.cab", false),
-        "cab"
-    );
+    assert_eq!(format_label(Some(ContainerFormat::Cab), "a.msu"), "msu-cab");
+    assert_eq!(format_label(Some(ContainerFormat::Wim), "a.MSU"), "msu-wim");
+    assert_eq!(format_label(Some(ContainerFormat::Cab), "a.cab"), "cab");
 }
 
 #[test]

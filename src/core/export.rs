@@ -71,10 +71,6 @@ pub fn warning_message(code: WarningCode, lang: Lang) -> &'static str {
             "內層容器無法展開，其內容未納入分析",
             "A nested container could not be unpacked; its contents were not analyzed",
         ),
-        WarningCode::PsfFailed => (
-            "PSF 差異封裝無法讀取",
-            "PSF patch storage could not be read",
-        ),
         WarningCode::SignatureNotValid => (
             "更新檔的數位簽章無效或不存在",
             "The update package signature is missing or invalid",
@@ -106,23 +102,24 @@ fn high_risk_entry(c: &Component, a: &Action) -> Value {
 pub fn build(report: &AnalysisReport, opts: &ExportOptions, generated_at: &str) -> Value {
     let included = |a: &Action| opts.kinds.contains(&a.kind());
 
-    let mut by_kind: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut by_risk: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut by_local: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut by_store: BTreeMap<&str, usize> = BTreeMap::new();
+    // enum 當鍵：serde 依 rename_all 產生 JSON 鍵名
+    let mut by_kind: BTreeMap<ActionKind, usize> = BTreeMap::new();
+    let mut by_risk: BTreeMap<Risk, usize> = BTreeMap::new();
+    let mut by_local: BTreeMap<LocalState, usize> = BTreeMap::new();
+    let mut by_store: BTreeMap<LocalState, usize> = BTreeMap::new();
     let mut rule_ids: BTreeSet<&'static str> = BTreeSet::new();
     let mut high = Vec::new();
     let mut total = 0usize;
     for c in &report.components {
         if let Some(l) = &c.local {
-            *by_store.entry(l.state.code()).or_default() += 1;
+            *by_store.entry(l.state).or_default() += 1;
         }
         for a in c.actions.iter().filter(|a| included(a)) {
             total += 1;
-            *by_kind.entry(a.kind().code()).or_default() += 1;
-            *by_risk.entry(a.risk.code()).or_default() += 1;
+            *by_kind.entry(a.kind()).or_default() += 1;
+            *by_risk.entry(a.risk).or_default() += 1;
             if let Some(l) = &a.local {
-                *by_local.entry(l.state.code()).or_default() += 1;
+                *by_local.entry(l.state).or_default() += 1;
             }
             if a.risk == Risk::High {
                 high.push(high_risk_entry(c, a));
@@ -220,7 +217,7 @@ pub fn build(report: &AnalysisReport, opts: &ExportOptions, generated_at: &str) 
     root.insert(
         "export_filter".into(),
         json!({
-            "kinds": opts.kinds.iter().map(|k| k.code()).collect::<Vec<_>>(),
+            "kinds": opts.kinds,
             "detail": opts.detail.code(),
             "language": opts.lang.code(),
         }),

@@ -1,15 +1,18 @@
+mod common;
+
+use common::create_delta;
 use msu_inspector::core::delta::{is_dcm, DcmDecoder, DeltaEngine};
 use msu_inspector::core::sys;
 
 fn msdelta() -> DeltaEngine {
-    DeltaEngine::system("msdelta.dll").expect("msdelta.dll")
+    DeltaEngine::msdelta().expect("msdelta.dll")
 }
 
 #[test]
 fn applies_null_source_delta_round_trip() {
     let e = msdelta();
     let target = b"<assembly>hello</assembly>".repeat(20);
-    let d = e.create(b"", &target).unwrap();
+    let d = create_delta(b"", &target);
     assert!(d.starts_with(b"PA30"));
     assert_eq!(e.apply(b"", &d).unwrap(), target);
 }
@@ -19,7 +22,7 @@ fn applies_delta_against_source() {
     let e = msdelta();
     let src = b"version=1 ".repeat(100);
     let tgt = b"version=2 ".repeat(100);
-    let d = e.create(&src, &tgt).unwrap();
+    let d = create_delta(&src, &tgt);
     assert_eq!(e.apply(&src, &d).unwrap(), tgt);
 }
 
@@ -31,19 +34,11 @@ fn rejects_garbage_delta() {
 #[test]
 fn applies_empty_target_round_trip() {
     // msdelta.dll 的 CreateDeltaB 接受空目標（回傳成功、輸出 0 位元組，start 為 NULL）；
-    // ApplyDeltaB 同樣以 NULL start、size 0 成功回傳，驗證 apply()/create() 對此情形不會
+    // ApplyDeltaB 同樣以 NULL start、size 0 成功回傳，驗證 apply() 對此情形不會
     // 對 NULL 指標呼叫 from_raw_parts。
     let e = msdelta();
-    let d = e.create(b"", b"").expect("msdelta accepts an empty target");
+    let d = create_delta(b"", b"");
     assert_eq!(e.apply(b"", &d).unwrap(), Vec::<u8>::new());
-}
-
-#[test]
-fn selected_engine_applies_msdelta_output() {
-    let sel = DeltaEngine::select(None).unwrap();
-    assert!(sel.label().starts_with("system:"), "{}", sel.label());
-    let d = msdelta().create(b"", b"abc").unwrap();
-    assert_eq!(sel.apply(b"", &d).unwrap(), b"abc");
 }
 
 #[test]
@@ -53,7 +48,7 @@ fn dcm_round_trip_with_system_base() {
     assert!(dcm.base().starts_with(b"<?xml"));
     let xml = b"<?xml version=\"1.0\"?><assembly xmlns=\"urn:schemas-microsoft-com:asm.v3\"/>";
     let mut bytes = b"DCM\x01".to_vec();
-    bytes.extend(e.create(dcm.base(), xml).unwrap());
+    bytes.extend(create_delta(dcm.base(), xml));
     assert!(is_dcm(&bytes));
     assert_eq!(dcm.decode(&e, &bytes).unwrap(), xml);
 }
@@ -92,39 +87,4 @@ fn decodes_real_winsxs_manifest() {
 fn reports_native_arch() {
     assert!(["amd64", "arm64", "x86"].contains(&sys::native_arch()));
     assert!(sys::windows_dir().join("System32").is_dir());
-}
-
-#[test]
-fn tampered_package_dll_is_rejected() {
-    // 原封不動的 msdelta.dll 複本仍可透過系統目錄簽章驗證；改動一個位元組後即不再受信任
-    let t = tempfile::tempdir().unwrap();
-    let copy = t.path().join("UpdateCompression.dll");
-    let mut bytes = std::fs::read(sys::windows_dir().join("System32").join("msdelta.dll")).unwrap();
-    let mid = bytes.len() / 2;
-    bytes[mid] ^= 0xFF;
-    std::fs::write(&copy, bytes).unwrap();
-    let Err(e) = DeltaEngine::from_verified_package(&copy) else {
-        panic!("tampered DLL must not load");
-    };
-    assert!(e.to_string().contains("not signed by Microsoft"), "{e}");
-
-    let unsigned = t.path().join("unsigned.dll");
-    std::fs::write(&unsigned, b"MZ not signed").unwrap();
-    assert!(DeltaEngine::from_verified_package(&unsigned).is_err());
-}
-
-#[test]
-fn package_dll_is_locked_against_replacement_while_verifying() {
-    let t = tempfile::tempdir().unwrap();
-    let p = t.path().join("UpdateCompression.dll");
-    std::fs::write(&p, b"MZ").unwrap();
-    let held = msu_inspector::core::delta::open_locked(&p).unwrap();
-    assert!(
-        std::fs::write(&p, b"MZ swapped").is_err(),
-        "write must fail"
-    );
-    assert!(std::fs::remove_file(&p).is_err(), "delete must fail");
-    assert!(std::fs::read(&p).is_ok(), "readers are still allowed");
-    drop(held);
-    std::fs::remove_file(&p).unwrap();
 }

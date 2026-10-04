@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::core::{HSTRING, PCWSTR};
 
-use super::{is_reparse_point, is_within, role_at, Extracted, Item, ItemData, Role};
+use super::{is_reparse_point, is_within, role_at, Item, ItemData, Role};
 use crate::core::CoreError;
 
 type Handle = *mut c_void;
@@ -28,17 +28,13 @@ extern "system" {
     fn WIMGetImageCount(wim: Handle) -> u32;
     fn WIMLoadImage(wim: Handle, index: u32) -> Handle;
     fn WIMApplyImage(image: Handle, path: PCWSTR, flags: u32) -> i32;
-    fn WIMCaptureImage(wim: Handle, path: PCWSTR, flags: u32) -> Handle;
     fn WIMCloseHandle(h: Handle) -> i32;
     fn WIMRegisterMessageCallback(wim: Handle, cb: MessageCallback, user: *mut c_void) -> u32;
     fn WIMUnregisterMessageCallback(wim: Handle, cb: MessageCallback) -> u32;
 }
 
 const WIM_GENERIC_READ: u32 = 0x8000_0000;
-const WIM_GENERIC_WRITE: u32 = 0x4000_0000;
-const WIM_CREATE_NEW: u32 = 1;
 const WIM_OPEN_EXISTING: u32 = 3;
-const WIM_COMPRESS_XPRESS: u32 = 1;
 const WIM_FLAG_NO_DIRACL: u32 = 0x10;
 const WIM_FLAG_NO_FILEACL: u32 = 0x20;
 const WIM_MSG: u32 = 0x8000 + 0x1476;
@@ -53,8 +49,6 @@ const ERROR_PRIVILEGE_NOT_HELD: u32 = 1314;
 
 struct CallbackCtx<'a> {
     cancel: &'a AtomicBool,
-    want: &'a dyn Fn(Role) -> bool,
-    skipped: Vec<(String, Role)>,
     out_dir: &'a Path,
     vprefix: &'a str,
 }
@@ -107,10 +101,7 @@ unsafe extern "system" fn on_message(
     }
     let vpath = vpath_of(ctx, full);
     let role = role_at(&vpath);
-    if role == Role::Ignore || !(ctx.want)(role) {
-        if role != Role::Ignore {
-            ctx.skipped.push((vpath, role));
-        }
+    if role == Role::Ignore {
         // SAFETY: lParam points to a BOOL owned by wimgapi for the duration of this
         // callback. Writing 0 (FALSE) tells wimgapi to skip applying this file — this
         // matches Microsoft's own Convert-WindowsImage.ps1 SkipFile() helper, which
@@ -145,18 +136,15 @@ pub fn extract(
     vprefix: &str,
     out_dir: &Path,
     cancel: &AtomicBool,
-    want: &dyn Fn(Role) -> bool,
-) -> Result<Extracted, CoreError> {
+) -> Result<Vec<Item>, CoreError> {
     // 無壓縮 WIM（24H2 的 .msu）直接解析：wimgapi 展開需要系統管理員的還原權限
     if super::wimread::is_uncompressed(wim) {
-        return super::wimread::extract(wim, vprefix, out_dir, cancel, want);
+        return super::wimread::extract(wim, vprefix, out_dir, cancel);
     }
     let tmp = out_dir.join("_wimtmp");
     std::fs::create_dir_all(&tmp).map_err(|e| CoreError::io(&tmp, e))?;
     let mut ctx = CallbackCtx {
         cancel,
-        want,
-        skipped: Vec::new(),
         out_dir,
         vprefix,
     };
@@ -226,19 +214,12 @@ pub fn extract(
     }
     let _ = std::fs::remove_dir_all(&tmp);
 
-    let mut out = Extracted {
-        items: Vec::new(),
-        skipped: ctx.skipped,
-    };
-    collect_files(out_dir, out_dir, vprefix, want, &mut out.items)?;
-    Ok(out)
+    let mut items = Vec::new();
+    collect_files(out_dir, out_dir, vprefix, &mut items)?;
+    Ok(items)
 }
 
 /// 走訪展開結果，把需要的檔案轉成 Item；小檔讀進記憶體後刪除。
-///
-/// `want` is re-applied here (not just in the `WIM_MSG_PROCESS` callback) so that any
-/// unwanted-role file that ends up on disk regardless — e.g. because a future wimgapi
-/// quirk applies it despite the callback's skip signal — never becomes an `Item`.
 ///
 /// WIM 可能帶有符號連結／目錄連接（WIMApplyImage 會還原重新剖析點）：一律略過、不跟隨，
 /// 並確認每個走訪的資料夾實際位於 `root` 之下，因此只會讀取／刪除暫存資料夾內的檔案。
@@ -246,7 +227,6 @@ pub fn collect_files(
     root: &Path,
     dir: &Path,
     vprefix: &str,
-    want: &dyn Fn(Role) -> bool,
     items: &mut Vec<Item>,
 ) -> Result<(), CoreError> {
     if !is_within(dir, root) {
@@ -260,7 +240,7 @@ pub fn collect_files(
             continue;
         }
         if meta.is_dir() {
-            collect_files(root, &path, vprefix, want, items)?;
+            collect_files(root, &path, vprefix, items)?;
             continue;
         }
         if !meta.is_file() {
@@ -275,7 +255,7 @@ pub fn collect_files(
             .collect();
         let vpath = format!("{vprefix}/{}", rel.join("/"));
         let role = role_at(&vpath);
-        if role == Role::Ignore || !want(role) {
+        if role == Role::Ignore {
             continue;
         }
         let data = if role.to_disk() {
@@ -286,39 +266,6 @@ pub fn collect_files(
             ItemData::Bytes(bytes)
         };
         items.push(Item::new(vpath, data));
-    }
-    Ok(())
-}
-
-/// 測試用：把資料夾擷取成 WIM（非管理員可能被拒絕）。
-#[doc(hidden)]
-pub fn capture_for_tests(src_dir: &Path, wim: &Path) -> Result<(), CoreError> {
-    let tmp = wim.with_extension("tmpdir");
-    std::fs::create_dir_all(&tmp).map_err(|e| CoreError::io(&tmp, e))?;
-    // SAFETY: same as `extract` — handles are closed before returning.
-    unsafe {
-        let mut created = 0u32;
-        let h = WIMCreateFile(
-            PCWSTR(HSTRING::from(wim.as_os_str()).as_ptr()),
-            WIM_GENERIC_WRITE,
-            WIM_CREATE_NEW,
-            0,
-            WIM_COMPRESS_XPRESS,
-            &mut created,
-        );
-        if h.is_null() {
-            return Err(map_error(last_error(), "capture"));
-        }
-        WIMSetTemporaryPath(h, PCWSTR(HSTRING::from(tmp.as_os_str()).as_ptr()));
-        let img = WIMCaptureImage(h, PCWSTR(HSTRING::from(src_dir.as_os_str()).as_ptr()), 0);
-        let err = last_error();
-        if !img.is_null() {
-            WIMCloseHandle(img);
-        }
-        WIMCloseHandle(h);
-        if img.is_null() {
-            return Err(map_error(err, "capture"));
-        }
     }
     Ok(())
 }
