@@ -293,6 +293,10 @@ mod tests {
             out_dir: out,
             vprefix: "kb.wim",
         };
+        assert_eq!(
+            vpath_of(&ctx, Path::new(r"C:\out\1\a\b.mum")),
+            "kb.wim/a/b.mum"
+        );
         let user = &mut ctx as *mut CallbackCtx as *mut c_void;
         let call = |path: &str, user| {
             let wide = HSTRING::from(path);
@@ -310,15 +314,8 @@ mod tests {
         assert_eq!(call(r"C:\out\1\big.psf", user), (WIM_MSG_SUCCESS, 0));
         assert_eq!(call(r"C:\out\1\update.mum", user), (WIM_MSG_SUCCESS, 1));
         assert_eq!(call(r"C:\out\1\amd64_x_1.0", user), (WIM_MSG_SUCCESS, 1));
-        assert_eq!(
-            unsafe { on_message(0, 0, 0, std::ptr::null_mut()) },
-            WIM_MSG_SUCCESS
-        );
+        assert_eq!(unsafe { on_message(0, 0, 0, user) }, WIM_MSG_SUCCESS);
         cancel.store(true, Ordering::Relaxed);
         assert_eq!(call(r"C:\out\1\update.mum", user).0, WIM_MSG_ABORT_IMAGE);
-        assert_eq!(
-            vpath_of(&ctx, Path::new(r"C:\out\1\a\b.mum")),
-            "kb.wim/a/b.mum"
-        );
     }
 }
