@@ -145,3 +145,21 @@ fn prefers_update_mum_matching_kb_and_outside_ssu() {
     let p = select_package(&[ssu_same, lcu], Some("KB5099999"), BTreeMap::new());
     assert_eq!(p.identity.name, "LCU");
 }
+
+#[test]
+fn package_kb_beats_renamed_file() {
+    let a = update_mum("x.msu/a.cab/update.mum", "KB5000001", "A");
+    let b = update_mum("x.msu/b.cab/update.mum", "KB5049999", "B");
+    let mut props = BTreeMap::new();
+    props.insert("KB Article Number".to_string(), "5049999".to_string());
+    // 檔名說 KB5000001，但套件內容是 KB5049999
+    let p = select_package(&[a.clone(), b.clone()], Some("KB5000001"), props);
+    assert_eq!(p.identity.name, "B");
+    assert_eq!(p.kb.as_deref(), Some("KB5049999"));
+
+    // identifier 不是 KB、也沒有 pkgProperties：改用套件名稱中的 KB，而不是檔名
+    let mut rollup = update_mum("x.cab/update.mum", "RollupFix", "Package_for_KB5049999");
+    rollup.file_name = "Package_for_KB5049999.mum".into();
+    let p = select_package(&[rollup], Some("KB5000001"), BTreeMap::new());
+    assert_eq!(p.kb.as_deref(), Some("KB5049999"));
+}

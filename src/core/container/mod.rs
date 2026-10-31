@@ -189,6 +189,10 @@ impl Collected {
     }
 }
 
+/// 巢狀深度與容器總數上限：真實更新最多 3～4 層，防止惡意構造的套件無限展開塞滿暫存磁碟。
+const MAX_NESTING: usize = 8;
+const MAX_CONTAINERS: usize = 10_000;
+
 /// 遞迴展開外層容器與所有巢狀 CAB / WIM，收集 manifest、.mum 與 pkgProperties。
 pub fn collect(path: &Path, work: &Path, ctx: &Ctx) -> Result<Collected, CoreError> {
     let file_name = path
@@ -201,10 +205,24 @@ pub fn collect(path: &Path, work: &Path, ctx: &Ctx) -> Result<Collected, CoreErr
         ..Default::default()
     };
     let cancel = ctx.cancel_flag();
-    let mut queue = VecDeque::from([(path.to_path_buf(), file_name, outer)]);
+    let mut queue = VecDeque::from([(path.to_path_buf(), file_name, outer, 0usize)]);
     let mut n = 0usize;
-    while let Some((p, vpath, fmt)) = queue.pop_front() {
+    while let Some((p, vpath, fmt, depth)) = queue.pop_front() {
         ctx.check()?;
+        if depth > MAX_NESTING || n >= MAX_CONTAINERS {
+            let reason = format!("nesting limit reached (depth {depth}, {n} containers)");
+            c.warnings
+                .push(Warning::new(WarningCode::ContainerFailed, &vpath, &reason));
+            c.containers.push(ContainerInfo {
+                path: vpath,
+                format: fmt,
+                skipped: Some(reason),
+            });
+            if is_within(&p, work) {
+                let _ = std::fs::remove_file(&p);
+            }
+            continue;
+        }
         ctx.report(Progress::Unpacking {
             container: vpath.clone(),
         });
@@ -267,7 +285,7 @@ pub fn collect(path: &Path, work: &Path, ctx: &Ctx) -> Result<Collected, CoreErr
                         });
                         continue;
                     }
-                    queue.push_back((fp, item.vpath, nested));
+                    queue.push_back((fp, item.vpath, nested, depth + 1));
                 }
                 Role::Ignore => {}
             }

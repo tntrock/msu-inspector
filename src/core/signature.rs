@@ -51,6 +51,12 @@ fn with_trust<R>(path: &Path, f: impl FnOnce(u32, HANDLE) -> R) -> R {
     }
 }
 
+/// Windows 更新由「Microsoft Corporation」或「Microsoft Windows」簽署；
+/// 其他受信任的簽署者（商用或企業內部憑證）也會被 WinVerifyTrust 視為有效，要另外標示。
+pub fn is_microsoft_signer(signer: Option<&str>) -> bool {
+    signer.is_some_and(|s| s == "Microsoft Corporation" || s == "Microsoft Windows")
+}
+
 pub fn verify(path: &Path) -> SignatureInfo {
     with_trust(path, |code, state| {
         let status = status_from_code(code);

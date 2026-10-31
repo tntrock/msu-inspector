@@ -462,6 +462,7 @@ pub enum WarningCode {
     MumParseFailed,
     ContainerFailed,
     SignatureNotValid,
+    SignerNotMicrosoft,
     LocalCompareFailed,
     TempCleanupFailed,
 }

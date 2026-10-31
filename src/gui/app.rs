@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
 
 use eframe::egui;
@@ -123,10 +123,20 @@ impl App {
             return;
         };
         let mut finished = None;
-        while let Ok(msg) = job.rx.try_recv() {
-            match msg {
-                JobMsg::Progress(p) => job.progress = Some(p),
-                JobMsg::Done(r) => finished = Some(*r),
+        loop {
+            match job.rx.try_recv() {
+                Ok(JobMsg::Progress(p)) => job.progress = Some(p),
+                Ok(JobMsg::Done(r)) => finished = Some(*r),
+                Err(TryRecvError::Empty) => break,
+                // 工作緒沒送出結果就結束（panic）：當成分析失敗，不要一直轉圈
+                Err(TryRecvError::Disconnected) => {
+                    if finished.is_none() {
+                        finished = Some(Err(CoreError::Internal(
+                            "analysis thread stopped unexpectedly".into(),
+                        )));
+                    }
+                    break;
+                }
             }
         }
         let Some(result) = finished else {
@@ -421,5 +431,26 @@ mod tests {
         app.mode_chosen = false;
         app.open(PathBuf::from("later.msu"), &ctx);
         assert_eq!(app.pending, Some(PathBuf::from("later.msu")));
+    }
+
+    #[test]
+    fn worker_panic_becomes_an_error() {
+        let (tx, rx) = mpsc::channel::<JobMsg>();
+        let handle = std::thread::spawn(move || {
+            let _tx = tx;
+            panic!("boom");
+        });
+        let _ = handle.join();
+        let mut app = App::new(None);
+        app.job = Some(Job {
+            file: PathBuf::from("x.msu"),
+            rx,
+            cancel: Arc::new(AtomicBool::new(false)),
+            handle: std::thread::spawn(|| {}),
+            progress: None,
+        });
+        app.poll_job();
+        assert!(app.job.is_none());
+        assert!(app.error.is_some());
     }
 }

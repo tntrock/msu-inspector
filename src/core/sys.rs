@@ -5,15 +5,21 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::SystemInformation::{
-    GetNativeSystemInfo, PROCESSOR_ARCHITECTURE_AMD64, PROCESSOR_ARCHITECTURE_ARM64,
-    PROCESSOR_ARCHITECTURE_INTEL, SYSTEM_INFO,
+    GetNativeSystemInfo, GetSystemWindowsDirectoryW, PROCESSOR_ARCHITECTURE_AMD64,
+    PROCESSOR_ARCHITECTURE_ARM64, PROCESSOR_ARCHITECTURE_INTEL, SYSTEM_INFO,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+/// 系統的 Windows 資料夾。不讀 `SystemRoot` 環境變數：它可被呼叫端任意設定，
+/// 會讓 DCM 基底（wcp.dll）與本機比對讀到假的 WinSxS。
 pub fn windows_dir() -> PathBuf {
-    std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+    let mut buf = [0u16; 260];
+    // SAFETY: 緩衝區長度正確；回傳值為寫入的字元數（不含結尾 NUL），失敗或不足時另行處理。
+    let n = unsafe { GetSystemWindowsDirectoryW(Some(&mut buf)) } as usize;
+    if n == 0 || n >= buf.len() {
+        return PathBuf::from(r"C:\Windows");
+    }
+    PathBuf::from(String::from_utf16_lossy(&buf[..n]))
 }
 
 /// 以元件 manifest 的 `processorArchitecture` 用語回傳原生架構。

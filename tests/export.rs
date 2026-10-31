@@ -191,6 +191,7 @@ fn every_warning_has_a_message() {
             MumParseFailed,
             ContainerFailed,
             SignatureNotValid,
+            SignerNotMicrosoft,
             LocalCompareFailed,
             TempCleanupFailed,
         ] {

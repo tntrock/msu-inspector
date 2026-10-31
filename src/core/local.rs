@@ -5,7 +5,7 @@ use std::ffi::c_void;
 use std::path::{self, Path, PathBuf};
 
 use windows::core::{w, HSTRING};
-use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
 };
@@ -399,8 +399,10 @@ fn split_root(key: &str) -> Option<(HKEY, String)> {
     }
 }
 
-fn open_key(key_name: &str, wow32: bool) -> Option<HKEY> {
-    let (root, sub) = split_root(key_name)?;
+/// 開啟失敗時回傳 Win32 錯誤；`ERROR_FILE_NOT_FOUND` 才代表機碼不存在
+/// （存取被拒等其他錯誤時機碼其實存在）。無法對應的根機碼也回傳 `ERROR_FILE_NOT_FOUND`。
+fn open_key(key_name: &str, wow32: bool) -> Result<HKEY, WIN32_ERROR> {
+    let (root, sub) = split_root(key_name).ok_or(ERROR_FILE_NOT_FOUND)?;
     let access = KEY_READ
         | if wow32 {
             KEY_WOW64_32KEY
@@ -410,10 +412,18 @@ fn open_key(key_name: &str, wow32: bool) -> Option<HKEY> {
     let mut hkey = HKEY::default();
     // SAFETY: 成功時由呼叫端以 RegCloseKey 關閉。
     let r = unsafe { RegOpenKeyExW(root, &HSTRING::from(sub), Some(0), access, &mut hkey) };
-    (r == ERROR_SUCCESS).then_some(hkey)
+    if r == ERROR_SUCCESS {
+        Ok(hkey)
+    } else {
+        Err(r)
+    }
 }
 
 pub fn read_reg_value(key_name: &str, value: &str, wow32: bool) -> Option<RegValue> {
+    query_reg_value(key_name, value, wow32).ok()
+}
+
+fn query_reg_value(key_name: &str, value: &str, wow32: bool) -> Result<RegValue, WIN32_ERROR> {
     let hkey = open_key(key_name, wow32)?;
     let name = HSTRING::from(value);
     // SAFETY: 兩段式查詢：先取大小再讀取。
@@ -434,25 +444,20 @@ pub fn read_reg_value(key_name: &str, value: &str, wow32: bool) -> Option<RegVal
         }
         let _ = RegCloseKey(hkey);
         if result != ERROR_SUCCESS {
-            return None;
+            return Err(result);
         }
         buf.truncate(len as usize);
-        Some(decode_reg(ty, &buf))
+        Ok(decode_reg(ty, &buf))
     }
 }
 
-fn key_exists(key_name: &str, wow32: bool) -> Option<bool> {
-    split_root(key_name)?;
-    Some(match open_key(key_name, wow32) {
-        Some(h) => {
-            // SAFETY: h 由 open_key 開啟。
-            unsafe {
-                let _ = RegCloseKey(h);
-            }
-            true
-        }
-        None => false,
-    })
+/// 本機狀態：不存在 → New；存在但讀不到（例如存取被拒）→ Present。
+fn missing_or_present(e: WIN32_ERROR, incoming: Option<String>) -> LocalStatus {
+    if e == ERROR_FILE_NOT_FOUND {
+        status(LocalState::New, None, incoming)
+    } else {
+        status(LocalState::Present, None, incoming)
+    }
 }
 
 fn parse_number(s: &str) -> Option<u64> {
@@ -492,20 +497,25 @@ pub fn same_value(value_type: &str, incoming: &str, current: &RegValue) -> bool 
 }
 
 pub fn compare_registry(r: &RegistryAction, wow32: bool) -> LocalStatus {
-    let Some(value) = &r.value_name else {
-        return match key_exists(&r.key, wow32) {
-            None => status(LocalState::UnknownPath, None, None),
-            Some(true) => status(LocalState::Same, None, None),
-            Some(false) => status(LocalState::New, None, None),
-        };
-    };
     if split_root(&r.key).is_none() {
         return status(LocalState::UnknownPath, None, None);
     }
+    let Some(value) = &r.value_name else {
+        return match open_key(&r.key, wow32) {
+            Ok(h) => {
+                // SAFETY: h 由 open_key 開啟。
+                unsafe {
+                    let _ = RegCloseKey(h);
+                }
+                status(LocalState::Same, None, None)
+            }
+            Err(e) => missing_or_present(e, None),
+        };
+    };
     let incoming = r.data.as_deref().map(clip);
-    match read_reg_value(&r.key, value, wow32) {
-        None => status(LocalState::New, None, incoming),
-        Some(cur) => {
+    match query_reg_value(&r.key, value, wow32) {
+        Err(e) => missing_or_present(e, incoming),
+        Ok(cur) => {
             let same = r
                 .data
                 .as_deref()
