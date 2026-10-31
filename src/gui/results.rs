@@ -499,4 +499,45 @@ mod tests {
         );
         assert!(!row_matches(&c, &svc_low, TreeSel::All, &all_risks, "zzz"));
     }
+
+    #[test]
+    fn renders_every_panel_headless() {
+        use crate::gui::testutil::{frame, report};
+        let r = report();
+        let model = SizeModel::build(&r);
+        let mut res = Results::new(r, model, PathBuf::from("kb.msu"));
+        assert_eq!(res.kind_count(ActionKind::Driver), 1);
+        let ctx = egui::Context::default();
+        for lang in Lang::ALL {
+            frame(&ctx, |ui| {
+                res.summary_bar(ui, lang);
+                res.status_bar(ui, lang);
+                res.ui(ui, lang);
+            });
+            // 選取一列、開警告視窗、改篩選條件後再畫一次
+            res.selected = Some(0);
+            res.show_warnings = true;
+            frame(&ctx, |ui| res.ui(ui, lang));
+            res.tree = TreeSel::Kind(ActionKind::File);
+            res.dirty = true;
+            frame(&ctx, |ui| res.ui(ui, lang));
+            assert_eq!(res.filtered, vec![1]);
+            assert_eq!(
+                res.selected, None,
+                "selection outside the filter is cleared"
+            );
+            res.tree = TreeSel::All;
+            res.dirty = true;
+        }
+        // 未簽章、無警告、靜態模式
+        res.report.source.signature.status = SignatureStatus::Unsigned;
+        res.report.warnings.clear();
+        res.report.mode = Mode::Static;
+        res.report.local_context = None;
+        frame(&ctx, |ui| {
+            res.summary_bar(ui, Lang::En);
+            res.status_bar(ui, Lang::En);
+            res.ui(ui, Lang::En);
+        });
+    }
 }

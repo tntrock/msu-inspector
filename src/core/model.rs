@@ -599,4 +599,66 @@ mod tests {
         });
         assert_eq!(file.target(), "$(runtime.system32)\\a.dll");
     }
+
+    #[test]
+    fn every_detail_has_a_target() {
+        use ActionDetail as D;
+        let reg = |v: Option<&str>| {
+            D::Registry(RegistryAction {
+                key: "HKLM".into(),
+                value_name: v.map(Into::into),
+                ..Default::default()
+            })
+            .target()
+        };
+        assert_eq!(reg(None), "HKLM");
+        assert_eq!(reg(Some("")), "HKLM [(default)]");
+        assert_eq!(reg(Some("V")), "HKLM [V]");
+        let cmd = |a: Option<&str>| {
+            D::GenericCommand(CommandAction {
+                executable: "x.exe".into(),
+                arguments: a.map(Into::into),
+                ..Default::default()
+            })
+            .target()
+        };
+        assert_eq!(cmd(Some("/q")), "x.exe /q");
+        assert_eq!(cmd(Some("")), "x.exe");
+        let named = [
+            D::Directory(DirectoryAction {
+                path: "t".into(),
+                ..Default::default()
+            }),
+            D::ScheduledTask(TaskAction {
+                uri: "t".into(),
+                ..Default::default()
+            }),
+            D::FirewallRule(FirewallAction {
+                name: "t".into(),
+                ..Default::default()
+            }),
+            D::WmiMof(MofAction {
+                file: "t".into(),
+                ..Default::default()
+            }),
+            D::EtwEventlog(EtwAction {
+                provider: "t".into(),
+                ..Default::default()
+            }),
+            D::AdvancedInstaller(AdvancedInstallerAction {
+                element: "t".into(),
+                ..Default::default()
+            }),
+            D::Setting(SettingAction {
+                element: "t".into(),
+            }),
+            D::Unknown(UnknownAction {
+                element: "t".into(),
+                ..Default::default()
+            }),
+        ];
+        for d in named {
+            assert_eq!(d.target(), "t", "{d:?}");
+        }
+    }
 }

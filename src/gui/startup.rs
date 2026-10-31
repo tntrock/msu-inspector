@@ -33,3 +33,17 @@ pub fn show(ctx: &egui::Context, t: &Strings) -> Option<Choice> {
     }
     choice
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::Lang;
+
+    #[test]
+    fn no_choice_until_user_acts() {
+        let ctx = egui::Context::default();
+        let mut got = Some(Choice::Elevate);
+        crate::gui::testutil::frame(&ctx, |_| got = show(&ctx, Lang::En.strings()));
+        assert_eq!(got, None);
+    }
+}

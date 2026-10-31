@@ -374,4 +374,68 @@ mod tests {
         }
         assert!(error_text(&CoreError::NoPackageFound, Lang::ZhTw).starts_with("檔案中找不到"));
     }
+
+    #[test]
+    fn every_name_and_message_has_text() {
+        use crate::core::model::{LocalState::*, SignatureStatus};
+        for lang in Lang::ALL {
+            assert_eq!(Lang::parse(lang.code()), Some(lang));
+            assert!(!lang.native_name().is_empty());
+            for s in [
+                New,
+                Replace,
+                Same,
+                Downgrade,
+                Present,
+                UnknownPath,
+                InStoreSame,
+                InStoreOlder,
+                InStoreNewer,
+                NotInStore,
+            ] {
+                assert!(!local_name(s, lang).is_empty());
+            }
+            for d in Detail::ALL {
+                assert!(!detail_name(d, lang).is_empty());
+            }
+            for s in [
+                SignatureStatus::Valid,
+                SignatureStatus::Unsigned,
+                SignatureStatus::Invalid,
+                SignatureStatus::Unknown,
+            ] {
+                assert!(!signature_name(s, lang).is_empty());
+            }
+            for r in Risk::ALL {
+                assert!(!risk_name(r, lang).is_empty());
+            }
+            assert_ne!(
+                not_applicable_text("arch_mismatch", lang),
+                not_applicable_text("build_mismatch", lang)
+            );
+            for e in [
+                CoreError::UnsupportedFormat("x".into()),
+                CoreError::NeedsElevation("x".into()),
+                CoreError::Cancelled,
+                CoreError::Container {
+                    path: "p".into(),
+                    detail: "d".into(),
+                },
+            ] {
+                assert!(error_text(&e, lang).contains('\n'));
+            }
+            for p in [
+                Progress::Hashing,
+                Progress::Verifying,
+                Progress::Unpacking {
+                    container: "kb.cab".into(),
+                },
+                Progress::Decoding { done: 1, total: 2 },
+                Progress::Comparing { done: 1, total: 2 },
+            ] {
+                assert!(!progress_text(&p, lang).is_empty());
+            }
+        }
+        assert!(matches!(Lang::detect(), Lang::ZhTw | Lang::En));
+    }
 }

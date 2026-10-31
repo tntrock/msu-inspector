@@ -354,4 +354,72 @@ mod tests {
             "cancel_and_join took unexpectedly long; the worker may not have observed the cancel flag"
         );
     }
+
+    /// 不開視窗跑 `App::ui`：啟動選擇框 → 分析失敗顯示錯誤 → 顯示結果與匯出對話框。
+    #[test]
+    fn runs_app_frames_headless() {
+        use crate::gui::testutil::report;
+        let ctx = egui::Context::default();
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut app = App::new(None);
+        let mut step = |app: &mut App, input: egui::RawInput| {
+            ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame))
+                .textures_delta
+                .clear();
+        };
+
+        app.mode_chosen = false;
+        step(&mut app, egui::RawInput::default());
+
+        // 拖入不是更新檔的檔案 → 背景分析失敗 → 顯示錯誤
+        app.mode_chosen = true;
+        let mut input = egui::RawInput::default();
+        #[derive(Debug)]
+        struct Dropped(PathBuf);
+        impl egui::DroppedFile for Dropped {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                std::fs::read(&self.0).map_err(|e| e.to_string())
+            }
+        }
+        input.dropped_files.push(Arc::new(Dropped(
+            std::path::absolute("Cargo.toml").unwrap(),
+        )));
+        step(&mut app, input);
+        assert!(app.job.is_some());
+        assert!(app.current_file().is_some());
+        let start = Instant::now();
+        while app.job.is_some() && start.elapsed() < Duration::from_secs(30) {
+            step(&mut app, egui::RawInput::default());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(app.error.is_some(), "analysis of Cargo.toml should fail");
+
+        let r = report();
+        let model = SizeModel::build(&r);
+        app.error = None;
+        app.results = Some(Results::new(r, model, "kb.msu".into()));
+        app.export = Some(ExportDialog::new());
+        for l in Lang::ALL {
+            app.lang = l;
+            step(&mut app, egui::RawInput::default());
+        }
+        assert_eq!(app.current_file(), Some(PathBuf::from("kb.msu")));
+
+        // 進行中的工作：狀態列顯示進度，關閉視窗時會取消並等待
+        app.open(std::path::absolute("Cargo.toml").unwrap(), &ctx);
+        if let Some(j) = &mut app.job {
+            j.progress = Some(Progress::Hashing);
+        }
+        step(&mut app, egui::RawInput::default());
+        eframe::App::on_exit(&mut app);
+        assert!(app.job.is_none());
+
+        // 尚未選擇模式時，開檔只會先記住
+        app.mode_chosen = false;
+        app.open(PathBuf::from("later.msu"), &ctx);
+        assert_eq!(app.pending, Some(PathBuf::from("later.msu")));
+    }
 }

@@ -56,3 +56,92 @@ fn setup_fonts(ctx: &egui::Context) {
     }
     ctx.set_fonts(fonts);
 }
+
+/// GUI 測試共用：不開視窗，只跑 egui 的版面配置，讓繪製程式碼實際執行。
+#[cfg(test)]
+pub(crate) mod testutil {
+    use eframe::egui;
+
+    use crate::core::model::*;
+
+    pub fn frame(ctx: &egui::Context, f: impl FnMut(&mut egui::Ui)) {
+        // 沒有繪圖後端：材質更新直接丟棄
+        ctx.run_ui(egui::RawInput::default(), f)
+            .textures_delta
+            .clear();
+    }
+
+    /// 兩個元件、高／低風險動作、本機比對結果與警告。
+    pub fn report() -> AnalysisReport {
+        let local = |state| {
+            Some(LocalStatus {
+                state,
+                current: Some("10.0.1".into()),
+                incoming: Some("10.0.2".into()),
+            })
+        };
+        let driver = Action {
+            risk: Risk::High,
+            rules: vec!["DRV_BOOT_START"],
+            local: local(LocalState::Replace),
+            ..Action::new(ActionDetail::Driver(DriverAction {
+                name: "testdrv".into(),
+                ..Default::default()
+            }))
+        };
+        let file = Action {
+            risk: Risk::Low,
+            ..Action::new(ActionDetail::File(FileAction {
+                name: "a.dll".into(),
+                destination: "$(runtime.system32)".into(),
+                ..Default::default()
+            }))
+        };
+        AnalysisReport {
+            mode: Mode::StaticLocal,
+            local_context: Some(LocalContext {
+                applicable: false,
+                not_applicable_reason: Some("arch_mismatch".into()),
+                ..Default::default()
+            }),
+            source: SourceInfo {
+                file: "kb.msu".into(),
+                signature: SignatureInfo {
+                    status: SignatureStatus::Valid,
+                    signer: Some("Microsoft".into()),
+                },
+                ..Default::default()
+            },
+            package: PackageInfo {
+                kb: Some("KB1".into()),
+                ..Default::default()
+            },
+            components: vec![
+                Component {
+                    identity: AssemblyIdentity {
+                        name: "Kernel".into(),
+                        ..Default::default()
+                    },
+                    categories: vec!["boot".into()],
+                    local: local(LocalState::NotInStore),
+                    actions: vec![driver],
+                    ..Default::default()
+                },
+                Component {
+                    actions: vec![file],
+                    ..Default::default()
+                },
+            ],
+            warnings: vec![Warning::new(WarningCode::ContainerFailed, "x", "y")],
+        }
+    }
+
+    #[test]
+    fn loads_fonts() {
+        let ctx = egui::Context::default();
+        super::setup_fonts(&ctx);
+        frame(&ctx, |ui| {
+            ui.label("繁體中文");
+        });
+    }
+}
