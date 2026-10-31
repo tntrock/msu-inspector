@@ -1,5 +1,14 @@
 # msu-inspector
 
+[![CI](https://github.com/tntrock/msu-inspector/actions/workflows/ci.yml/badge.svg)](https://github.com/tntrock/msu-inspector/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tntrock/msu-inspector/graph/badge.svg)](https://codecov.io/gh/tntrock/msu-inspector)
+[![CodeQL](https://github.com/tntrock/msu-inspector/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/tntrock/msu-inspector/security/code-scanning)
+[![Release](https://img.shields.io/github/v/release/tntrock/msu-inspector)](https://github.com/tntrock/msu-inspector/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/tntrock/msu-inspector/total)](https://github.com/tntrock/msu-inspector/releases)
+[![License: MIT](https://img.shields.io/github/license/tntrock/msu-inspector)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0078D6?logo=windows)
+![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)
+
 Windows 更新套件（`.msu` / `.cab`）部署前審查工具：**不安裝**，靜態解析 KB 安裝後會對系統做的動作（檔案、登錄、服務、驅動、排程工作、執行指令、防火牆規則、WMI、進階安裝程式…），依規則標示風險，並可匯出 JSON 交給雲端 AI 進一步分析。
 
 ## 功能
