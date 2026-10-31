@@ -269,3 +269,53 @@ pub fn collect_files(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_file_names() {
+        assert!(looks_like_file("a.manifest"));
+        assert!(looks_like_file("x.cab"));
+        assert!(!looks_like_file("amd64_foo_10.0.1"), "numeric extension");
+        assert!(!looks_like_file("noext"));
+        assert!(!looks_like_file("a.toolongext"));
+    }
+
+    /// 直接呼叫 wimgapi 回呼：略過不需要的檔案、保留其餘，取消時中止。
+    #[test]
+    fn message_callback_skips_ignored_files() {
+        let out = Path::new(r"C:\out");
+        let cancel = AtomicBool::new(false);
+        let mut ctx = CallbackCtx {
+            cancel: &cancel,
+            out_dir: out,
+            vprefix: "kb.wim",
+        };
+        assert_eq!(
+            vpath_of(&ctx, Path::new(r"C:\out\1\a\b.mum")),
+            "kb.wim/a/b.mum"
+        );
+        let user = &mut ctx as *mut CallbackCtx as *mut c_void;
+        let call = |path: &str, user| {
+            let wide = HSTRING::from(path);
+            let mut keep: i32 = 1;
+            let r = unsafe {
+                on_message(
+                    WIM_MSG_PROCESS,
+                    wide.as_ptr() as usize,
+                    &mut keep as *mut i32 as isize,
+                    user,
+                )
+            };
+            (r, keep)
+        };
+        assert_eq!(call(r"C:\out\1\big.psf", user), (WIM_MSG_SUCCESS, 0));
+        assert_eq!(call(r"C:\out\1\update.mum", user), (WIM_MSG_SUCCESS, 1));
+        assert_eq!(call(r"C:\out\1\amd64_x_1.0", user), (WIM_MSG_SUCCESS, 1));
+        assert_eq!(unsafe { on_message(0, 0, 0, user) }, WIM_MSG_SUCCESS);
+        cancel.store(true, Ordering::Relaxed);
+        assert_eq!(call(r"C:\out\1\update.mum", user).0, WIM_MSG_ABORT_IMAGE);
+    }
+}

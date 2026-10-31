@@ -152,3 +152,70 @@ fn analyzes_bare_relative_path() {
     let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(v["package"]["kb"], "KB5129195");
 }
+
+/// 同一組參數在行程內呼叫 `cli::run`：子行程的覆蓋率不會被量到。
+fn run_in_process(args: &[&std::ffi::OsStr]) -> i32 {
+    let mut v = vec![std::ffi::OsString::from("msu-inspector")];
+    v.extend(args.iter().map(|a| a.to_os_string()));
+    msu_inspector::cli::run(v)
+}
+
+#[test]
+fn in_process_exit_codes() {
+    use std::ffi::OsStr;
+    let t = tempfile::tempdir().unwrap();
+    let msu = build_msu(t.path());
+    let m = msu.as_os_str();
+    let out = t.path().join("out.json");
+    let a = |s: &'static str| OsStr::new(s);
+
+    assert_eq!(
+        run_in_process(&[
+            a("analyze"),
+            m,
+            a("--json"),
+            out.as_os_str(),
+            a("--lang"),
+            a("en")
+        ]),
+        1
+    );
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(v["package"]["kb"], "KB5129195");
+    assert_eq!(
+        run_in_process(&[
+            a("analyze"),
+            m,
+            a("--json"),
+            a("-"),
+            a("--kinds"),
+            a("file")
+        ]),
+        1
+    );
+    assert_eq!(
+        run_in_process(&[a("analyze"), m, a("--lang"), a("zh-TW")]),
+        1
+    );
+    // 寫入不存在的資料夾 → 失敗
+    let bad = t.path().join("no-such-dir").join("x.json");
+    assert_eq!(
+        run_in_process(&[a("analyze"), m, a("--json"), bad.as_os_str()]),
+        2
+    );
+    assert_eq!(
+        run_in_process(&[a("analyze"), m, a("--detail"), a("huge")]),
+        2
+    );
+    assert_eq!(
+        run_in_process(&[a("analyze"), m, a("--kinds"), a("nope")]),
+        2
+    );
+    let missing = t.path().join("missing.msu");
+    assert_eq!(run_in_process(&[a("analyze"), missing.as_os_str()]), 2);
+    assert_eq!(run_in_process(&[a("--version")]), 0);
+    assert_eq!(run_in_process(&[a("bogus")]), 2);
+    if !msu_inspector::elevation::is_elevated() {
+        assert_eq!(run_in_process(&[a("analyze"), m, a("--compare-local")]), 2);
+    }
+}

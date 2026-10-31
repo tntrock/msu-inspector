@@ -155,6 +155,7 @@ impl ExportDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::export::SizeModel;
     use crate::core::model::{AnalysisReport, Mode};
 
     #[test]
@@ -180,5 +181,21 @@ mod tests {
             default_file_name(&r, Detail::Full),
             "windows11.0-x64-static-full.json"
         );
+    }
+
+    #[test]
+    fn renders_dialog_headless() {
+        use crate::gui::testutil::{frame, report};
+        let r = report();
+        let model = SizeModel::build(&r);
+        let results = Results::new(r, model, "kb.msu".into());
+        let mut d = ExportDialog::default();
+        assert!(d.is_open());
+        let ctx = egui::Context::default();
+        d.message = Some("ok".into());
+        for lang in Lang::ALL {
+            frame(&ctx, |_| d.show(&ctx, lang, &results));
+        }
+        assert!(d.is_open());
     }
 }

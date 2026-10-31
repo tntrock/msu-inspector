@@ -178,3 +178,23 @@ fn parses_detail_codes() {
     }
     assert!(Detail::Summary < Detail::Risk && Detail::Risk < Detail::Full);
 }
+
+#[test]
+fn every_warning_has_a_message() {
+    use msu_inspector::core::export::warning_message;
+    use msu_inspector::core::model::WarningCode::*;
+    use msu_inspector::i18n::Lang;
+    for lang in Lang::ALL {
+        for code in [
+            ManifestDecodeFailed,
+            ManifestParseFailed,
+            MumParseFailed,
+            ContainerFailed,
+            SignatureNotValid,
+            LocalCompareFailed,
+            TempCleanupFailed,
+        ] {
+            assert!(!warning_message(code, lang).is_empty());
+        }
+    }
+}
