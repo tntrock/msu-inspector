@@ -117,11 +117,17 @@ fn under_ssu(vpath: &str) -> bool {
 
 /// 選出頂層套件：`update.mum`（identifier 與 KB 相符者優先，其次不在 SSU 容器下者）→
 /// `Package_for_*` 且 identifier 與 KB 相符 → identifier 相符 → 參照最多子套件 / 元件者。
+///
+/// `kb_hint` 來自檔名，可能被改名；套件內 pkgProperties 的 `KB Article Number` 優先。
 pub fn select_package(
     mums: &[MumInfo],
     kb_hint: Option<&str>,
     properties: BTreeMap<String, String>,
 ) -> PackageInfo {
+    let kb_from_props = properties
+        .get("KB Article Number")
+        .map(|n| format!("KB{}", n.trim()));
+    let kb_hint = kb_from_props.as_deref().or(kb_hint);
     let top = mums
         .iter()
         .filter(|m| m.file_name.eq_ignore_ascii_case("update.mum"))
@@ -150,9 +156,6 @@ pub fn select_package(
                 .max_by_key(|m| m.sub_packages.len() + m.components.len())
         });
 
-    let kb_from_props = properties
-        .get("KB Article Number")
-        .map(|n| format!("KB{}", n.trim()));
     let mut applicability: Vec<String> = properties
         .get("ApplicabilityInfo")
         .cloned()
@@ -161,7 +164,7 @@ pub fn select_package(
 
     let Some(top) = top else {
         return PackageInfo {
-            kb: kb_hint.map(str::to_string).or(kb_from_props),
+            kb: kb_hint.map(str::to_string),
             applicability,
             properties,
             ..Default::default()
@@ -176,8 +179,10 @@ pub fn select_package(
         .identifier
         .clone()
         .filter(|i| i.to_ascii_uppercase().starts_with("KB"))
-        .or_else(|| kb_hint.map(str::to_string))
-        .or(kb_from_props);
+        .or_else(|| kb_from_props.clone())
+        // 例：`Package_for_KB5049999`（identifier 為 RollupFix 時）
+        .or_else(|| kb_from_file_name(&top.identity.name))
+        .or_else(|| kb_hint.map(str::to_string));
     PackageInfo {
         kb,
         identity: top.identity.clone(),

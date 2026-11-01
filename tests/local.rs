@@ -260,6 +260,27 @@ fn reads_local_file_and_registry() {
         compare_registry(&hkcu, false).state,
         LocalState::UnknownPath
     );
+    // 不存在的機碼 → New；存在但讀不到（SECURITY 連系統管理員都無法開啟）→ Present
+    let missing = RegistryAction {
+        key: r"HKEY_LOCAL_MACHINE\SOFTWARE\msu-inspector-no-such-key".into(),
+        value_name: None,
+        ..Default::default()
+    };
+    assert_eq!(compare_registry(&missing, false).state, LocalState::New);
+    let denied = RegistryAction {
+        key: r"HKEY_LOCAL_MACHINE\SECURITY\Policy".into(),
+        value_name: Some("x".into()),
+        ..Default::default()
+    };
+    assert_eq!(compare_registry(&denied, false).state, LocalState::Present);
+    let denied_key = RegistryAction {
+        value_name: None,
+        ..denied
+    };
+    assert_eq!(
+        compare_registry(&denied_key, false).state,
+        LocalState::Present
+    );
 }
 
 #[test]

@@ -15,17 +15,21 @@ jobs:
       contents: read
       id-token: write # Codecov OIDC upload, no token secret needed
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # 第三方 action 一律固定到 commit SHA（標籤可被移動）；Dependabot 會更新
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: rustfmt, clippy, llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: taiki-e/install-action@e891bb389537b38fb955c19833f884ca3188a61d # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       # main.rs、UAC 重新啟動、WM_DROPFILES 子類別化只能在真的視窗／UAC 下執行，不計入覆蓋率
       - run: cargo llvm-cov --lcov --output-path lcov.info --ignore-filename-regex '(src[\\/]main\.rs|src[\\/]elevation\.rs|elevated_drop\.rs)$'
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
         with:
           files: lcov.info
           disable_search: true

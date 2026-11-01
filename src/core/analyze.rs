@@ -59,10 +59,17 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
 
+    // 雜湊與簽章驗證各自讀完整個檔案（數 GB），同時進行
     ctx.report(Progress::Hashing);
-    let sha256 = sha256_file(path, ctx)?;
-    ctx.report(Progress::Verifying);
-    let signature = signature::verify(path);
+    let (sha256, signature) = std::thread::scope(|s| {
+        let verifying = s.spawn(|| signature::verify(path));
+        let sha256 = sha256_file(path, ctx);
+        if sha256.is_ok() {
+            ctx.report(Progress::Verifying);
+        }
+        (sha256, verifying.join().unwrap_or_default())
+    });
+    let sha256 = sha256?;
 
     let builder = {
         let mut b = tempfile::Builder::new();
@@ -89,6 +96,12 @@ pub fn analyze(path: &Path, opts: &AnalyzeOptions, ctx: &Ctx) -> Result<Analysis
             WarningCode::SignatureNotValid,
             &file_name,
             format!("{:?}", signature.status).to_ascii_lowercase(),
+        ));
+    } else if !signature::is_microsoft_signer(signature.signer.as_deref()) {
+        warnings.push(Warning::new(
+            WarningCode::SignerNotMicrosoft,
+            &file_name,
+            signature.signer.clone().unwrap_or_default(),
         ));
     }
     let (components, parse_warnings) = decode_and_parse(&collected.manifests, ctx)?;
@@ -169,7 +182,11 @@ pub fn close_temp(temp: tempfile::TempDir, warnings: &mut Vec<Warning>) {
     }
 }
 
-type DcmTools = (DeltaEngine, Result<DcmDecoder, CoreError>);
+/// msdelta.dll 或 wcp.dll 載入失敗時只影響 DCM manifest（各記一筆警告），其餘照常分析。
+type DcmTools = (
+    Result<DeltaEngine, CoreError>,
+    Result<DcmDecoder, CoreError>,
+);
 
 fn decode_one(item: &Item, dcm: Option<&DcmTools>) -> Result<String, CoreError> {
     let bytes = item.bytes()?;
@@ -178,6 +195,9 @@ fn decode_one(item: &Item, dcm: Option<&DcmTools>) -> Result<String, CoreError> 
     }
     let (engine, decoder) =
         dcm.ok_or_else(|| CoreError::Delta("DCM decoder unavailable".into()))?;
+    let engine = engine
+        .as_ref()
+        .map_err(|e| CoreError::Delta(e.to_string()))?;
     let decoder = decoder
         .as_ref()
         .map_err(|e| CoreError::Delta(e.to_string()))?;
@@ -193,7 +213,7 @@ fn decode_and_parse(
         .iter()
         .any(|i| matches!(&i.data, container::ItemData::Bytes(b) if is_dcm(b)));
     let dcm: Option<DcmTools> = if needs_dcm {
-        Some((DeltaEngine::msdelta()?, DcmDecoder::from_system()))
+        Some((DeltaEngine::msdelta(), DcmDecoder::from_system()))
     } else {
         None
     };

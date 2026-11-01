@@ -254,3 +254,36 @@ fn payload_containers_inside_component_folders_are_not_unpacked() {
         c.containers
     );
 }
+
+#[test]
+fn stops_at_nesting_limit() {
+    let t = tempfile::tempdir().unwrap();
+    let d = t.path();
+    // 12 層：c11.cab 裡有 c10.cab …，最外層 outer.cab 另有 update.mum
+    let mut prev = common::make_cab(d, "c0.cab", &[("deep.mum", b"<assembly/>")], false);
+    for i in 1..12 {
+        let name = format!("c{i}.cab");
+        let bytes = std::fs::read(&prev).unwrap();
+        let prev_name = prev.file_name().unwrap().to_string_lossy().into_owned();
+        prev = common::make_cab(d, &name, &[(prev_name.as_str(), &bytes)], false);
+    }
+    let bytes = std::fs::read(&prev).unwrap();
+    let outer = common::make_cab(
+        d,
+        "outer.cab",
+        &[("update.mum", b"<assembly/>"), ("c11.cab", &bytes)],
+        false,
+    );
+    let work = d.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let c = collect(&outer, &work, &Ctx::silent()).unwrap();
+    assert_eq!(
+        names(&c.mums),
+        vec!["update.mum"],
+        "deep.mum is past the limit"
+    );
+    assert!(c
+        .warnings
+        .iter()
+        .any(|w| w.code == WarningCode::ContainerFailed && w.detail.contains("nesting limit")));
+}

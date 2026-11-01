@@ -26,6 +26,8 @@ pub enum CoreError {
     Cancelled,
     #[error("Windows API error: {0}")]
     Win32(String),
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 impl CoreError {

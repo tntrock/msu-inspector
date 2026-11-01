@@ -1,5 +1,5 @@
 use msu_inspector::core::model::SignatureStatus;
-use msu_inspector::core::signature::{status_from_code, verify};
+use msu_inspector::core::signature::{is_microsoft_signer, status_from_code, verify};
 use msu_inspector::core::sys;
 
 #[test]
@@ -30,10 +30,16 @@ fn embedded_microsoft_signature_is_valid() {
     }
     let info = verify(&p);
     assert_eq!(info.status, SignatureStatus::Valid);
-    assert!(
-        info.signer.as_deref().unwrap_or("").contains("Microsoft"),
-        "{info:?}"
-    );
+    assert!(is_microsoft_signer(info.signer.as_deref()), "{info:?}");
+}
+
+#[test]
+fn only_microsoft_signers_count() {
+    assert!(is_microsoft_signer(Some("Microsoft Corporation")));
+    assert!(is_microsoft_signer(Some("Microsoft Windows")));
+    assert!(!is_microsoft_signer(Some("Contoso Ltd")));
+    assert!(!is_microsoft_signer(Some("Microsoft Corporation Fake")));
+    assert!(!is_microsoft_signer(None));
 }
 
 #[test]

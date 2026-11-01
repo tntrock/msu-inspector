@@ -75,6 +75,10 @@ pub fn warning_message(code: WarningCode, lang: Lang) -> &'static str {
             "更新檔的數位簽章無效或不存在",
             "The update package signature is missing or invalid",
         ),
+        WarningCode::SignerNotMicrosoft => (
+            "數位簽章有效，但簽署者不是 Microsoft",
+            "The signature is valid but the signer is not Microsoft",
+        ),
         WarningCode::LocalCompareFailed => (
             "無法讀取本機狀態，未做本機比對",
             "Local state could not be read; no local comparison was made",
