@@ -16,7 +16,7 @@ jobs:
       id-token: write # Codecov OIDC upload, no token secret needed
     steps:
       # 第三方 action 一律固定到 commit SHA（標籤可被移動）；Dependabot 會更新
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
@@ -29,7 +29,7 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       # main.rs、UAC 重新啟動、WM_DROPFILES 子類別化只能在真的視窗／UAC 下執行，不計入覆蓋率
       - run: cargo llvm-cov --lcov --output-path lcov.info --ignore-filename-regex '(src[\\/]main\.rs|src[\\/]elevation\.rs|elevated_drop\.rs)$'
-      - uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: lcov.info
           disable_search: true
